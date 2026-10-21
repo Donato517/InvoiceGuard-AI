@@ -1,0 +1,15 @@
+{#
+  @template pages/errors/error.html
+  @description 通用錯誤頁：API 錯誤、權限不足、系統錯誤（由 app.core.exceptions 處理）。
+  @context status_code: int HTTP 狀態碼
+  @context message: str     給使用者看的錯誤訊息（不含內部細節）
+#}
+{% extends "layouts/blank.html" %}
+{% block title %}發生錯誤{% endblock %}
+{% block content %}
+  <section class="error-page">
+    <h1>發生錯誤（{{ status_code }}）</h1>
+    <p>{{ message }}</p>
+    <a href="/" class="btn btn--primary">回首頁</a>
+  </section>
+{% endblock content %}

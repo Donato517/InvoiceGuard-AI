@@ -1,0 +1,13 @@
+{#
+  @template pages/invoices/detail.html
+  @description 發票詳情：發票資料、明細、AI 風險分數與判斷理由。
+  @route GET /invoices/{invoice_id}（需登入）
+  @context invoice_id: int 發票 ID
+#}
+{% extends "layouts/default.html" %}
+{% block title %}發票詳情{% endblock %}
+{% block content %}
+  <h1>發票詳情 #{{ invoice_id }}</h1>
+  {# TODO(JerryChien): 顯示 invoice 資料；金額用 |currency、時間用 |taipei_datetime #}
+  <p class="empty-state">內容建置中</p>
+{% endblock content %}

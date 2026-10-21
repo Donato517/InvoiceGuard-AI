@@ -1,0 +1,15 @@
+{#
+  @template layouts/default.html
+  @description 前台預設版型：頁首 + 內容 + 頁尾。一般頁面繼承此檔。
+  @block content 頁面主要內容
+#}
+{% extends "base.html" %}
+{% block body %}
+  <div class="default-layout">
+    {% include "partials/header.html" %}
+    <main class="default-layout__main container">
+      {% block content %}{% endblock %}
+    </main>
+    {% include "partials/footer.html" %}
+  </div>
+{% endblock body %}

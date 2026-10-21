@@ -1,0 +1,25 @@
+{#
+  @template pages/invoices/upload.html
+  @description 上傳發票：選擇圖片或 PDF 後送出，完成後導向發票詳情查看分析結果。
+  @route GET /invoices/upload（需登入）
+#}
+{% extends "layouts/default.html" %}
+{% block title %}上傳發票{% endblock %}
+{% block content %}
+  <h1>上傳發票</h1>
+  {# TODO(JerryChien): POST /invoices/upload 完成後移除 disabled #}
+  <form method="post"
+        action="/invoices/upload"
+        enctype="multipart/form-data"
+        class="form">
+    <div class="form-field">
+      <label for="file">發票檔案（JPG / PNG / PDF）</label>
+      <input id="file"
+             name="file"
+             type="file"
+             accept="image/jpeg,image/png,application/pdf"
+             required>
+    </div>
+    <button type="submit" class="btn btn--primary" disabled>上傳（建置中）</button>
+  </form>
+{% endblock content %}
