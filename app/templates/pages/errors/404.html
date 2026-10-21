@@ -1,0 +1,13 @@
+{#
+  @template pages/errors/404.html
+  @description 404 頁面：找不到網址時顯示（由 app.core.exceptions 處理）。
+#}
+{% extends "layouts/blank.html" %}
+{% block title %}找不到頁面{% endblock %}
+{% block content %}
+  <section class="error-page">
+    <h1>找不到頁面</h1>
+    <p>您要找的頁面不存在或已移除。</p>
+    <a href="/" class="btn btn--primary">回首頁</a>
+  </section>
+{% endblock content %}

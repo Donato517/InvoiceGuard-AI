@@ -1,8 +1,8 @@
-# 系統架構說明 — InvoiceGuard-AI（前台）
+# 系統架構說明 — InvoiceGuard-AI（前台網站）
 
 ## 1. 系統全貌
 
-InvoiceGuard AI 由三個獨立的 Git repository 組成，各自部署為一個 Vercel Project：
+InvoiceGuard AI 由三個獨立的 Git repository 組成，**全部以 Python 撰寫**，各自部署為一個 Vercel Python Function：
 
 ```
       User                              Admin
@@ -10,77 +10,101 @@ InvoiceGuard AI 由三個獨立的 Git repository 組成，各自部署為一個
        v                                  v
 ┌──────────────────────┐        ┌──────────────────────────┐
 │ InvoiceGuard-AI      │        │ InvoiceGuard-AI-ADMIN    │
-│ Vue 3 + Vite (SPA)   │        │ Vue 3 + Vite (SPA)       │
-│ Vercel Static        │        │ Vercel Static            │
+│ FastAPI + Jinja2     │        │ FastAPI + Jinja2         │
+│ Vercel Function (Py) │        │ Vercel Function (Py)     │
 └──────────┬───────────┘        └─────────────┬────────────┘
-           │ /api/v1/*                        │ /api/v1/admin/*
-           └────────────────┬─────────────────┘
-                            ▼  HTTPS + JSON (Bearer token)
-             ┌──────────────────────────────┐
-             │ InvoiceGuard-AI-API          │◀──── Vercel Cron
-             │ Python FastAPI               │      GET /api/cron/*
-             │ Vercel Function (Python)     │
-             └───┬──────────┬──────────┬────┘
-                 │          │          │
-                 ▼          ▼          ▼
-            PostgreSQL  AI Model   MOF e-Invoice
-            (Neon)      Service    API
+           │ HTTPS + JSON (server side)       │
+           ▼                                  │
+┌──────────────────────┐                      │ SQL
+│ InvoiceGuard-AI-API  │◀── Vercel Cron       │ (own DB module)
+│ FastAPI              │                      │
+│ Vercel Function (Py) │──▶ AI Model          │
+└──────────┬───────────┘──▶ MOF e-Invoice API │
+           │ SQL                              │
+           ▼                                  │
+┌──────────────────────┐                      │
+│ PostgreSQL (Neon)    │◀─────────────────────┘
+└──────────────────────┘
 ```
 
-| Repository | 角色 | 技術 | 部署 |
+| Repository | 角色 | 技術 | 資料存取 |
 |---|---|---|---|
-| **InvoiceGuard-AI**（本專案） | 前台：使用者上傳發票、查看 AI 分析結果 | Vue 3 + Vite | Vercel 靜態網站 |
-| InvoiceGuard-AI-ADMIN | 後台：發票審核、使用者管理、排程與稽核紀錄 | Vue 3 + Vite | Vercel 靜態網站 |
-| InvoiceGuard-AI-API | 後端：REST API、AI 分析、第三方串接、排程 | Python FastAPI | Vercel Python Function |
-
-前端**不直接**連資料庫或第三方服務，所有資料都經由 InvoiceGuard-AI-API。
+| **InvoiceGuard-AI**（本專案） | 前台網站：使用者上傳發票、查看 AI 分析結果 | FastAPI + Jinja2 | 由伺服器端呼叫 API，**不直接連資料庫** |
+| InvoiceGuard-AI-ADMIN | 後台網站：發票審核、使用者管理、排程與稽核紀錄 | FastAPI + Jinja2 | 自有 DB 模組，直接連資料庫 |
+| InvoiceGuard-AI-API | 後端 API：AI 分析、第三方串接、排程 | FastAPI | 自有 DB 模組 + Alembic |
 
 ---
 
-## 2. 目錄結構
+## 2. 運作方式（伺服器端產生 HTML）
+
+瀏覽器只能執行 JavaScript，因此本網站的 Python 程式在**伺服器端**完成所有工作，瀏覽器只收到 HTML：
+
+```
+瀏覽器  ──GET /invoices──▶  routers/invoices.py
+                               │ 1. 檢查登入 cookie（core/deps.py）
+                               │ 2. 呼叫 API 取資料（clients/invoices.py）
+                               │ 3. 套用樣板產生 HTML（templates/pages/invoices/list.html）
+瀏覽器  ◀──────HTML──────────┘
+```
+
+- **局部更新**：使用 HTMX，在 HTML 加上 `hx-get` 等屬性，即可只替換頁面某一區塊，不必自己寫 JavaScript
+- **JavaScript**：只放少量全站共用互動（`static/js/main.js`），不寫呼叫 API 的程式
+
+---
+
+## 3. 目錄結構
 
 ```
 InvoiceGuard-AI/
-├── public/                       # 不經編譯、原樣複製到網站根目錄的檔案
-│   ├── favicon.svg
-│   └── robots.txt
-├── src/
-│   ├── main.js                   # ★ 進入點：建立 app、掛載 Pinia / Router / 全域樣式
-│   ├── App.vue                   # 根元件：依路由 meta.layout 切換版型
-│   ├── api/                      # 後端 API 呼叫
-│   │   ├── http.js               #   axios 共用實例（token、逾時、統一錯誤格式）
-│   │   └── modules/              #   依後端資源分檔：auth.js、invoice.js
-│   ├── assets/                   # 會經過 Vite 編譯（加 hash、壓縮）的靜態資源
-│   │   ├── css/                  #   全域樣式：variables.css（設計變數）、reset.css、main.css（入口）
-│   │   ├── img/                  #   圖片（png / jpg / webp）
-│   │   ├── icons/                #   SVG 圖示
+├── app/
+│   ├── main.py                   # ★ 進入點：建立 app、掛載 /static、註冊例外處理與頁面路由（Vercel 自動偵測）
+│   ├── constants.py              # 全站常數：網站名稱、cookie 名稱、發票狀態顯示文字
+│   ├── core/                     # 全域核心
+│   │   ├── config.py             #   環境變數設定（唯一讀取環境變數的地方）
+│   │   ├── templating.py         #   Jinja2 樣板環境、filter、static_url()
+│   │   ├── security.py           #   登入 cookie、防 open redirect、同源檢查（防 CSRF）
+│   │   ├── deps.py               #   相依注入（AccessToken：需要登入的頁面）
+│   │   ├── exceptions.py         #   未登入導向、錯誤頁
+│   │   └── logging_config.py     #   日誌格式
+│   ├── clients/                  # 呼叫 InvoiceGuard-AI-API（伺服器端）
+│   │   ├── base.py               #   共用呼叫 request_json()、ApiError
+│   │   ├── auth.py               #   /auth/*
+│   │   └── invoices.py           #   /invoices/*
+│   ├── routers/                  # 頁面路由，一個功能一個檔案
+│   │   ├── health.py             #   GET /health
+│   │   ├── robots.py             #   GET /robots.txt
+│   │   ├── home.py               #   GET /
+│   │   ├── auth.py               #   GET/POST /login、POST /logout
+│   │   └── invoices.py           #   /invoices、/invoices/upload、/invoices/{id}
+│   ├── templates/                # ★ Jinja2 樣板（HTML）
+│   │   ├── base.html             #   HTML 骨架（<head>、全站 css / js）
+│   │   ├── layouts/              #   版型：default（頁首頁尾）、blank（登入 / 錯誤頁）
+│   │   ├── partials/             #   共用片段：header、footer
+│   │   └── pages/                #   頁面樣板，依功能分資料夾（與 routers/ 對應）
+│   │       ├── home/
+│   │       ├── auth/
+│   │       ├── invoices/
+│   │       └── errors/
+│   ├── static/                   # ★ 靜態檔（網址 /static/...，部署後由 Vercel CDN 提供）
+│   │   ├── css/                  #   variables.css（設計變數）、reset.css、components.css、main.css（入口）
+│   │   ├── js/                   #   main.js（全站共用）
+│   │   │   └── vendor/           #   第三方函式庫（htmx），原樣引入不修改
+│   │   ├── img/                  #   圖片
+│   │   ├── icons/                #   SVG 圖示、favicon
 │   │   └── fonts/                #   自訂字型
-│   ├── components/               # 可重用元件
-│   │   ├── common/               #   通用 UI 元件（BaseButton、BaseModal…），不含業務邏輯
-│   │   ├── business/             #   業務元件（InvoiceCard、RiskBadge…）
-│   │   └── layout/               #   版型組件（AppHeader、AppFooter）
-│   ├── composables/              # 可重用的組合式函式（useXxx.js）
-│   ├── constants/                # 常數與列舉（與後端共用的值需註明來源）
-│   ├── layouts/                  # 版型：DefaultLayout（頁首頁尾）、BlankLayout（登入 / 錯誤頁）
-│   ├── router/                   # 路由：index.js（路由表）、guards.js（登入檢查、頁面標題）
-│   ├── stores/                   # Pinia store：index.js（實例）、user.js（登入狀態）
-│   ├── utils/                    # 純函式工具（format.js：金額 / 日期顯示）
-│   └── views/                    # 頁面元件（一個路由對應一個 XxxView.vue）
-│       ├── home/
-│       ├── auth/
-│       ├── invoice/
-│       └── error/
+│   └── utils/                    # 無狀態工具：format.py（金額 / 台灣時間）、file_utils.py（暫存檔）
 ├── tests/
-│   └── unit/                     # Vitest 單元測試（xxx.test.js）
-├── docs/                         # 專案文件
-├── tmp/                          # 本機暫存（不進版控）
+│   ├── conftest.py               # client / logged_in_client fixture
+│   └── unit/
+├── docs/
+├── tmp/                          # 本機暫存（不進版控；Vercel 上改用 /tmp）
 ├── .github/pull_request_template.md
 ├── .vscode/extensions.json       # 建議安裝的 VS Code 擴充套件
-├── index.html                    # HTML 樣板（Vite 入口）
-├── vite.config.js                # Vite 設定（@ 別名、port）
-├── vercel.json                   # Vercel 設定（SPA rewrite、安全標頭、快取）
-├── eslint.config.js / .prettierrc.json / jsconfig.json
-├── package.json
+├── vercel.json                   # Function 設定、安全標頭、靜態檔快取
+├── requirements.txt              # 正式環境依賴（Vercel 安裝）
+├── requirements-dev.txt          # 開發 / 測試依賴
+├── ruff.toml / .djlintrc / pytest.ini
+├── .python-version               # Python 版本（Vercel 依此選擇）
 ├── .env.example                  # 環境變數範本
 ├── .editorconfig / .gitattributes / .gitignore
 └── README.md
@@ -88,71 +112,55 @@ InvoiceGuard-AI/
 
 ---
 
-## 3. 檔案放置規則（我要放 js / css / 圖片 / 暫存檔，該放哪？）
+## 4. 檔案放置規則（程式碼 / js / css / 圖片 / 暫存檔該放哪？）
 
 | 要放的東西 | 位置 | 說明 |
 |---|---|---|
-| 頁面 | `src/views/<功能>/XxxView.vue` | 一個路由一個檔案 |
-| 跨頁共用的 UI 元件 | `src/components/common/` | 不可呼叫 API、不可依賴 store |
-| 業務元件 | `src/components/business/` | 例：發票卡片、風險標籤 |
-| 呼叫後端 API | `src/api/modules/<資源>.js` | 元件內禁止直接用 axios / fetch |
-| 可重用的狀態邏輯 | `src/composables/useXxx.js` | 例：`useLoading`、`usePagination` |
-| 跨頁共享的狀態 | `src/stores/<名稱>.js` | 只放真正需要跨頁共享的資料 |
-| 工具函式（JS） | `src/utils/` | 純函式，不碰 DOM、不呼叫 API |
-| 常數 / 列舉 | `src/constants/` | 禁止在程式中寫魔術字串 |
-| 全域 CSS | `src/assets/css/` | 元件樣式寫在 `.vue` 的 `<style scoped>` |
-| 設計變數（色碼、間距） | `src/assets/css/variables.css` | 元件內禁止寫死色碼 |
-| 圖片 | `src/assets/img/` | 會被 Vite 加 hash，可長期快取 |
-| SVG 圖示 | `src/assets/icons/` | |
-| 字型 | `src/assets/fonts/` | |
-| 需固定網址的檔案 | `public/` | 例：favicon、robots.txt、OG 分享圖 |
-| 無法用 npm 安裝的第三方腳本 | `public/vendor/`（需要時再建立） | 盡量改用 npm 套件 |
-| 暫存檔（匯出測試、截圖、除錯輸出） | `tmp/` | 已列入 `.gitignore`，只保留 `.gitkeep` |
-| 建置輸出 | `dist/` | 自動產生，不進版控 |
+| 頁面路由（Python） | `app/routers/<功能>.py` | 只做：檢查登入 → 呼叫 clients → 回傳樣板 |
+| 呼叫後端 API | `app/clients/<資源>.py` | routers 禁止直接使用 httpx |
+| 頁面 HTML | `app/templates/pages/<功能>/<頁面>.html` | 資料夾名稱與 routers 檔名一致 |
+| 多頁共用的 HTML 片段 | `app/templates/partials/` | 用 `{% include %}` 引入 |
+| 版型 | `app/templates/layouts/` | 頁面用 `{% extends %}` 繼承 |
+| 樣板用的格式化 | `app/utils/format.py` | 在 `core/templating.py` 註冊為 filter |
+| 常數 / 狀態文字 | `app/constants.py` | 禁止在程式或樣板中寫魔術字串 |
+| CSS | `app/static/css/` | 設計變數在 `variables.css`，共用元件在 `components.css` |
+| JavaScript | `app/static/js/main.js` | 只放全站共用的小型互動 |
+| 第三方 JS / CSS | `app/static/js/vendor/` | 原樣引入，版本記錄於該資料夾 README |
+| 圖片 | `app/static/img/` | |
+| SVG 圖示、favicon | `app/static/icons/` | |
+| 字型 | `app/static/fonts/` | |
+| 處理中的暫存檔 | 本機 `tmp/`、Vercel `/tmp/invoiceguard` | 一律用 `app.utils.file_utils.temp_file_path()`，用完自動刪除 |
+| 使用者上傳的原始檔 | 不存在本網站 | 直接轉交 API，由 API 存到 Vercel Blob |
 
 ---
 
-## 4. 資料流
+## 5. 登入與安全
 
-```
-View（頁面）
-  │ 呼叫
-  ├─▶ composables/useXxx.js（loading、分頁等可重用邏輯）
-  │       │
-  ▼       ▼
-api/modules/xxx.js ──▶ api/http.js（axios：baseURL、token、錯誤轉換）──▶ InvoiceGuard-AI-API
-  │
-  └─ 需要跨頁共享的結果 ──▶ stores/xxx.js
-```
-
-- `http.js` 成功時直接回傳 `response.data`；失敗時 reject 一個 `ApiError`（`{ code, message, details, status }`），畫面可直接顯示 `message`。
-- API 欄位為 **snake_case**，前端直接沿用，不做命名轉換。
-- 金額為字串、時間為 UTC，顯示時一律透過 `utils/format.js`。
-
----
-
-## 5. 路由規則
-
-| meta 欄位 | 型別 | 說明 |
+| 項目 | 做法 | 位置 |
 |---|---|---|
-| `title` | string | 頁面標題（瀏覽器分頁顯示「標題 \| InvoiceGuard AI」） |
-| `layout` | string | `default`（預設）/ `blank` |
-| `requiresAuth` | boolean | 需登入；未登入導向 `/login?redirect=原路徑` |
-
-- 路由 `name` 使用 kebab-case（`invoice-detail`），程式中以 `name` 導頁，不寫死路徑
-- 頁面元件一律 `() => import(...)` 動態載入
+| 登入狀態 | API 回傳的 access token 存在 **httpOnly cookie**（`ig_session`），瀏覽器 JS 讀不到 | `core/security.py` |
+| 需要登入的頁面 | 參數宣告 `token: AccessToken`；未登入自動導向 `/login?next=原頁面` | `core/deps.py` |
+| token 過期 | API 回 401 → 清除 cookie 並導向登入頁 | `core/exceptions.py` |
+| CSRF | cookie 設 `SameSite=Lax`；POST 路由加上 `Depends(verify_same_origin)` | `core/security.py` |
+| Open redirect | 登入後導向的 `next` 只允許站內路徑（`safe_next_path()`） | `core/security.py` |
+| XSS | Jinja2 自動跳脫；**禁止**對使用者或 API 資料使用 `\|safe` | `core/templating.py` |
+| 錯誤訊息 | 錯誤頁只顯示中文說明，內部細節寫入日誌 | `core/exceptions.py` |
 
 ---
 
 ## 6. 環境變數
 
+完整範本見 [`.env.example`](../.env.example)，讀取統一透過 `app/core/config.py`。
+
 | 變數 | 說明 | 範例 |
 |---|---|---|
-| `VITE_API_BASE_URL` | 後端 API 位址（含 `/api/v1`） | `http://localhost:8000/api/v1` |
+| `APP_ENV` | `local` / `preview` / `production`；非 local 時 cookie 只走 HTTPS | `local` |
+| `DEBUG` | 日誌輸出 DEBUG 等級 | `true` |
+| `API_BASE_URL` | InvoiceGuard-AI-API 位址（含 `/api/v1`） | `http://localhost:8000/api/v1` |
+| `API_TIMEOUT_SECONDS` | 呼叫 API 的逾時秒數 | `30` |
+| `SESSION_MAX_AGE_SECONDS` | 登入 cookie 有效秒數，應與 API 的 token 有效期一致 | `3600` |
 
-- 只有 `VITE_` 開頭的變數會被打包，**打包後任何人都看得到**，嚴禁放金鑰
-- 本機寫在 `.env.local`；Vercel 分別設定 Production / Preview 的值
-- 新增變數時同步更新 `.env.example` 與本表
+`API_BASE_URL` 只在伺服器端使用，不會出現在瀏覽器。新增變數時：`.env.example`、`app/core/config.py`、本表、Vercel Project Settings 四處同步。
 
 ---
 
@@ -160,21 +168,21 @@ api/modules/xxx.js ──▶ api/http.js（axios：baseURL、token、錯誤轉�
 
 | 項目 | 設定 |
 |---|---|
-| Framework Preset | Vite（自動偵測） |
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
-| SPA 路由 | `vercel.json` 將所有路徑 rewrite 到 `index.html`（實體檔案優先） |
-| 快取 | `/assets/*`（含 hash 檔名）設定一年快取 |
+| Framework Preset | FastAPI（由 `requirements.txt` 與 `app/main.py` 自動偵測） |
+| Python 版本 | `.python-version`（3.12） |
+| Function 設定 | `vercel.json` → `functions["app/main.py"]`：`maxDuration`、`excludeFiles` |
+| 靜態檔 | `app.mount("/static", ...)` 會在建置時提升到 CDN；**不要加全域 middleware**，否則靜態檔改由 Function 回應 |
+| 快取 | `/static/*` 設一年快取；網址帶 `?v=<commit>` 版本參數，部署新版後自動更新 |
 | Production | `main` 分支 |
-| Preview | 其他分支 / PR；`VITE_API_BASE_URL` 指向 API 的 Preview / 測試環境 |
-| CORS | 前台正式網域必須加入 API 的 `CORS_ORIGINS` |
+| Preview | 其他分支 / PR；`API_BASE_URL` 指向 API 的 Preview / 測試環境 |
 
 ---
 
-## 8. 新增頁面檢查清單
+## 8. 新增頁面檢查清單（以「發票詳情」為例）
 
-1. `src/views/<功能>/XxxView.vue`（含檔頭備註）
-2. `src/router/index.js` 新增路由，設定 `name`、`meta.title`、是否 `requiresAuth`
-3. 需要的 API 加到 `src/api/modules/<資源>.js`（含 JSDoc）
-4. 可重用的邏輯抽到 `composables/`，可重用的畫面抽到 `components/`
-5. `npm run lint && npm run test && npm run build` 通過
+1. `app/clients/invoices.py` — 確認有對應的 API 函式（含 docstring 與 API 路徑）
+2. `app/routers/invoices.py` — 新增路由；需登入就加 `token: AccessToken`；POST 加 `Depends(verify_same_origin)`
+3. `app/templates/pages/invoices/detail.html` — 繼承 `layouts/default.html`，檔頭寫 `@template` 備註
+4. 頁面專用樣式寫在 `main.css` 對應區塊（變多時拆成 `css/pages/<頁面>.css`）
+5. `tests/unit/` 新增測試（以 monkeypatch 替換 clients 函式）
+6. `ruff check .`、`djlint app/templates --lint`、`pytest` 通過

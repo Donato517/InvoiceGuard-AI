@@ -1,0 +1,14 @@
+{#
+  @template pages/home/index.html
+  @description 前台首頁：產品介紹與「上傳發票」入口。
+  @route GET /
+#}
+{% extends "layouts/default.html" %}
+{% block title %}首頁{% endblock %}
+{% block content %}
+  <section class="hero">
+    <h1 class="hero__title">{{ SITE_NAME }}</h1>
+    <p class="hero__subtitle">上傳發票，AI 協助檢查風險。</p>
+    <a href="/invoices/upload" class="btn btn--primary">開始上傳</a>
+  </section>
+{% endblock content %}
