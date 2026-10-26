@@ -22,7 +22,8 @@ def test_static_css_is_served(client: TestClient) -> None:
     assert response.status_code == 200
 
 
-def test_robots_txt_allows_indexing(client: TestClient) -> None:
+def test_robots_txt_does_not_block_crawling_so_noindex_is_read(client: TestClient) -> None:
+    # 不收錄由頁面 noindex 負責；robots.txt 不封鎖，搜尋引擎才讀得到 noindex。
     response = client.get("/robots.txt")
 
     assert response.status_code == 200
@@ -88,6 +89,32 @@ def test_login_rejects_cross_site_post(client: TestClient) -> None:
         data={"email": "a@example.com", "password": "x"},
         headers={"Origin": "https://evil.example.com"},
     )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_logout_accepts_same_host_origin_behind_https_proxy(
+    client: TestClient, scheme: str
+) -> None:
+    # Vercel 等 proxy 後 ASGI scheme 可能是 http，瀏覽器 Origin 仍是 https；正式模式只比對主機:埠。
+    proxied = TestClient(
+        client.app, base_url=f"{scheme}://invoiceguard.example", follow_redirects=False
+    )
+
+    response = proxied.post("/logout", headers={"Origin": "https://invoiceguard.example"})
+
+    assert response.status_code == 303
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["https://evil.example.com", "https://invoiceguard.example:444", "http://[::1", "null"],
+)
+def test_logout_rejects_other_host_or_malformed_origin(client: TestClient, origin: str) -> None:
+    proxied = TestClient(client.app, base_url="http://invoiceguard.example", follow_redirects=False)
+
+    response = proxied.post("/logout", headers={"Origin": origin})
 
     assert response.status_code == 403
 

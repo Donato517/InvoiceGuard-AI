@@ -6,23 +6,40 @@
   @block body    <body> 內容（由版型填入）
   @block scripts 頁面專用 JS
 #}
+{% set mobile_diagnostics = request.app.state.mobile_development | default(false) and request.url.path in ["/platforms", "/mobile", "/__dev/mobile"] %}
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="{{ ROBOTS_POLICY }}">
     <meta name="description" content="InvoiceGuard AI：上傳發票，AI 協助檢查風險">
     <title>
+      {% if mobile_diagnostics %}FRONTEND｜手機開發｜{% endif %}
       {% block title %}{% endblock %}
       | {{ SITE_NAME }}
     </title>
     <link rel="icon"
           type="image/svg+xml"
-          href="{{ static_url('icons/favicon.svg') }}">
+          href="{{ static_url(SITE_ICON) }}">
     <link rel="stylesheet" href="{{ static_url('css/main.css') }}">
+    {% if mobile_diagnostics %}
+      <link rel="stylesheet" href="{{ static_url('css/mobile-dev.css') }}">
+    {% endif %}
     {% block head %}{% endblock %}
   </head>
   <body>
+    {% if mobile_diagnostics %}
+      <aside class="mobile-platform-nav" aria-label="手機開發平台導覽">
+        <strong>FRONTEND｜手機開發</strong>
+        <nav aria-label="開發入口">
+          <a href="/platforms">平台導覽</a>
+          <a href="/frontend">前端網站</a>
+          <a href="/mobile">手機檢查</a>
+          <a href="/api-status">API 狀態</a>
+        </nav>
+      </aside>
+    {% endif %}
     {% block body %}{% endblock %}
     <script src="{{ static_url('js/vendor/htmx.min.js') }}" defer></script>
     <script src="{{ static_url('js/main.js') }}" defer></script>
