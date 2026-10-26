@@ -65,8 +65,48 @@ def verify_same_origin(request: Request, origin: Annotated[str | None, Header()]
     瀏覽器送出表單時會帶 Origin 標頭；與本站網域不同即拒絕，用來防止 CSRF。
     沒有 Origin 標頭（例如非瀏覽器的工具）時不阻擋，交由 SameSite cookie 保護。
 
+    一般／正式模式只比對 Origin 的「主機:埠」與 Host 標頭：Vercel 等平台在 proxy 後
+    傳給 ASGI 的 scheme 不保證是 https，不能拿 request.base_url 的 scheme 比對。
+    手機開發模式（LOCAL_HTTPS_ORIGIN／LOCAL_MOBILE_ORIGIN_FILE）才依完整 origin 嚴格比對；
+    握手檔尚未載入時沒有可信 origin，一律拒絕。
+
     Raises:
         ForbiddenError: 請求來源與本站不同。
     """
-    if origin is not None and urlsplit(origin).netloc != request.headers.get("host"):
+    if origin is None:
+        return
+    if settings.LOCAL_HTTPS_ORIGIN or settings.LOCAL_MOBILE_ORIGIN_FILE:
+        actual_origin = _origin_tuple(origin)
+        if actual_origin is None or actual_origin != _origin_tuple(settings.LOCAL_HTTPS_ORIGIN):
+            raise ForbiddenError("請求來源不正確")
+        return
+    try:
+        same_host = urlsplit(origin).netloc == request.headers.get("host")
+    except ValueError:
+        same_host = False
+    if not same_host:
         raise ForbiddenError("請求來源不正確")
+
+
+def _origin_tuple(value: str) -> tuple[str, str, int] | None:
+    """依 scheme／host／有效 port 比對，拒絕偽裝成 Origin 的帳密或路徑。"""
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or any(character.isspace() for character in value)
+            or "\\" in value
+        ):
+            return None
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == "https" else 80)
+        if not 1 <= port <= 65535:
+            return None
+        return parsed.scheme, parsed.hostname, port
+    except ValueError:
+        return None

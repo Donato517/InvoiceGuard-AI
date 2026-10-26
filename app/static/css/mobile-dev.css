@@ -1,0 +1,12 @@
+.mobile-check { max-width: 42rem; margin: 0 auto; padding: 1.25rem; }
+.mobile-check section { margin: 1.5rem 0; padding: 1rem; border: 1px solid #ccd3df; border-radius: .5rem; }
+.mobile-check h1 { font-size: 1.6rem; }
+.mobile-check h2 { font-size: 1.15rem; margin-bottom: .75rem; }
+.mobile-check button { margin: .25rem .5rem .5rem 0; padding: .75rem; min-height: 44px; }
+.mobile-check video { display: block; max-width: 100%; margin-top: .75rem; background: #111; }
+.mobile-check video[hidden] { display: none; }
+.mobile-check .development-note { padding: 1rem; background: #fff7dd; }
+.mobile-platform-nav { padding: .65rem 1rem; border-bottom: 1px solid #b7c9e8; background: #eaf1ff; }
+.mobile-platform-nav strong { display: block; font-size: .95rem; }
+.mobile-platform-nav nav { display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.mobile-platform-nav a, .platform-action { display: inline-flex; align-items: center; min-height: 44px; }

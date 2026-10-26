@@ -12,31 +12,32 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import BASE_DIR, settings
+from app.core.config import BASE_DIR, Settings, settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging_config import setup_logging
 from app.routers import auth, health, home, invoices, robots
 
-setup_logging()
 
-app = FastAPI(
-    title=settings.APP_NAME,
-    version="0.1.0",
-    # 網站不對外提供 API 文件
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-)
+def create_app(configuration: Settings | None = None) -> FastAPI:
+    """組裝原有網站；正式入口不掛載手機開發工具或全域 middleware。"""
+    configuration = configuration if configuration is not None else settings
+    configuration.require_environment()
+    setup_logging()
+    application = FastAPI(
+        title=configuration.APP_NAME,
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    application.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
+    register_exception_handlers(application)
+    application.include_router(health.router)
+    application.include_router(robots.router)
+    application.include_router(home.router)
+    application.include_router(auth.router)
+    application.include_router(invoices.router)
+    return application
 
-# ---- 靜態檔（css / js / img / icons / fonts）----
-app.mount("/static", StaticFiles(directory=BASE_DIR / "app" / "static"), name="static")
 
-# ---- 例外處理 ----
-register_exception_handlers(app)
-
-# ---- 頁面路由 ----
-app.include_router(health.router)
-app.include_router(robots.router)
-app.include_router(home.router)
-app.include_router(auth.router)
-app.include_router(invoices.router)
+app = create_app()

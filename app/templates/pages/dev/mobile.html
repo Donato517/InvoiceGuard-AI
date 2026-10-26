@@ -1,0 +1,35 @@
+{#
+  @template pages/dev/mobile.html
+  @description 受臨時 HTTPS 存取保護的手機相機與本機 API 健康檢查。
+  @route GET /mobile（僅手機開發模式，不代表業務登入／上傳已完成）
+#}
+{% extends "base.html" %}
+{% block title %}手機開發檢查{% endblock %}
+{% block body %}
+  <main class="mobile-check">
+    <h1>InvoiceGuard 手機開發檢查</h1>
+    <p>這個頁面用來確認 HTTPS、相機與本機 API 連線。臨時存取碼不會取代網站登入。</p>
+    <p><a href="/frontend">前端首頁</a> · <a href="/login">網站登入頁</a></p>
+    <section aria-labelledby="https-title">
+      <h2 id="https-title">HTTPS</h2>
+      <p id="https-result" role="status">檢查中</p>
+    </section>
+    <section aria-labelledby="api-title">
+      <h2 id="api-title">前端 → 本機 API</h2>
+      <button id="check-api" type="button">檢查 API 連線</button>
+      <p id="api-result" role="status">尚未檢查；只會讀取健康狀態，不操作資料。</p>
+    </section>
+    <section aria-labelledby="camera-title">
+      <h2 id="camera-title">相機權限與預覽</h2>
+      <button id="start-camera" type="button">開啟相機預覽</button>
+      <button id="stop-camera" type="button" disabled>停止相機</button>
+      <video id="camera-preview" autoplay muted playsinline hidden>
+      </video>
+      <p id="camera-result" role="status">尚未開啟；只有點按後才要求相機權限，不要求麥克風。</p>
+    </section>
+    <p class="development-note">此頁不拍照、不保存或上傳影像，也不呼叫 Gemini。網站登入、發票上傳與 AI 業務串接仍待後續實作與驗收。</p>
+  </main>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ static_url('js/mobile-dev.js') }}" defer></script>
+{% endblock %}

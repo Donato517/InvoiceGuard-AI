@@ -49,6 +49,7 @@ async def request_json(method: str, path: str, *, token: str | None = None, **kw
     Raises:
         ApiError: 連線失敗或 API 回傳錯誤狀態碼。
     """
+    settings.require_environment()
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
         async with httpx.AsyncClient(

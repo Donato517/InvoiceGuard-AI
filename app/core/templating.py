@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.constants import INVOICE_STATUS_LABEL, SESSION_COOKIE_NAME, SITE_NAME
 from app.core.config import BASE_DIR, settings
+from app.core.constants import ROBOTS_POLICY, SITE_ICON
 from app.utils.format import TAIPEI_TZ, format_currency, format_date, format_datetime
 
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
@@ -37,6 +38,8 @@ def current_year() -> int:
 # ---- 樣板全域變數 / 函式：樣板中可直接使用 ----
 templates.env.globals.update(
     SITE_NAME=SITE_NAME,
+    SITE_ICON=SITE_ICON,
+    ROBOTS_POLICY=ROBOTS_POLICY,
     SESSION_COOKIE_NAME=SESSION_COOKIE_NAME,
     INVOICE_STATUS_LABEL=INVOICE_STATUS_LABEL,
     static_url=static_url,

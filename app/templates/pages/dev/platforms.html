@@ -1,0 +1,33 @@
+{#
+  @template pages/dev/platforms.html
+  @description 手機 HTTPS 模式的平台導覽，連結只指向本次受保護入口。
+  @route GET /platforms（僅手機開發模式）
+#}
+{% extends "base.html" %}
+{% block title %}平台導覽{% endblock %}
+{% block body %}
+  <main class="mobile-check">
+    <h1>InvoiceGuard 開發平台導覽</h1>
+    <p>使用平台名稱選擇入口；本頁的連結都留在目前的手機 HTTPS 網址。</p>
+    <section aria-labelledby="frontend-platform-title">
+      <h2 id="frontend-platform-title">FRONTEND｜採購手機前端</h2>
+      <p>開啟原有前端網站。發票等受保護功能仍需要網站登入。</p>
+      <a class="platform-action" href="/frontend">開啟前端網站</a>
+    </section>
+    <section aria-labelledby="mobile-platform-title">
+      <h2 id="mobile-platform-title">MOBILE｜手機開發檢查</h2>
+      <p>檢查 HTTPS、相機預覽與前端到本機 API 的連線。</p>
+      <a class="platform-action" href="/mobile">開啟手機檢查</a>
+    </section>
+    <section aria-labelledby="api-platform-title">
+      <h2 id="api-platform-title">API｜本機 API 狀態</h2>
+      <p>由前端讀取本機 API 的健康狀態，只顯示連線檢查結果。</p>
+      <a class="platform-action" href="/api-status">檢查 API 狀態</a>
+    </section>
+    <section aria-labelledby="admin-platform-title">
+      <h2 id="admin-platform-title">ADMIN｜管理後台</h2>
+      <p>僅在電腦開啟，請使用電腦上既有的 ADMIN 啟動方式。此手機入口不公開管理後台。</p>
+    </section>
+    <p class="development-note">這些是開發入口名稱與路徑，不是固定網域。臨時存取碼不會取代網站登入，也不代表資料或模型功能已驗收。</p>
+  </main>
+{% endblock %}

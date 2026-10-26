@@ -5,7 +5,10 @@
     - INVOICE_STATUS_LABEL 的鍵必須涵蓋 API 專案 app/db/models/invoice.py 中 InvoiceStatus 的所有值。
 """
 
-SITE_NAME = "InvoiceGuard AI"
+from app.core.constants import SITE_NAMES
+
+# 網站名稱集中在三站共用的 app/core/constants.py
+SITE_NAME = SITE_NAMES["FRONTEND"]
 
 # 存放 API access token 的 cookie（httpOnly，瀏覽器端 JavaScript 讀不到）
 SESSION_COOKIE_NAME = "ig_session"
