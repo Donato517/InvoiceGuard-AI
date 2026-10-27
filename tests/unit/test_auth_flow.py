@@ -19,7 +19,6 @@ def test_login_page_renders() -> None:
     response = client.get("/login")
     assert response.status_code == 200
     assert "登入" in response.text
-    assert "user@example.com" in response.text
 
 
 def test_mobile_upload_unauthenticated_redirects_to_login() -> None:
@@ -40,7 +39,11 @@ def test_login_flow_redirects_to_next_page(monkeypatch: pytest.MonkeyPatch) -> N
 
     response = client.post(
         "/login",
-        data={"email": "user@example.com", "password": "password", "next": "/invoices/mobile-upload"},
+        data={
+            "email": "user@example.com",
+            "password": "password",
+            "next": "/invoices/mobile-upload",
+        },
         headers={"Host": "testserver", "Origin": "http://testserver"},
     )
     assert response.status_code == 303

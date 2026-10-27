@@ -5,8 +5,7 @@
 
 from typing import Any
 
-from app.clients.base import ApiError, request_json
-from app.core.config import settings
+from app.clients.base import request_json
 
 
 async def login(email: str, password: str) -> dict[str, Any]:
@@ -18,24 +17,9 @@ async def login(email: str, password: str) -> dict[str, Any]:
     Raises:
         ApiError: 帳號密碼錯誤（401）或其他 API 錯誤。
     """
-    normalized = email.strip().lower()
-    try:
-        return await request_json(
-            "POST", "/auth/login", json={"email": normalized, "password": password}
-        )
-    except ApiError as exc:
-        if (
-            exc.status_code == 503
-            and settings.APP_ENV == "local"
-            and normalized in {"user@example.com", "buyer@example.com", "admin@example.com"}
-            and password == "password"
-        ):
-            return {
-                "access_token": f"dev-offline-token-{normalized}",
-                "token_type": "bearer",
-                "expires_in": 86400,
-            }
-        raise
+    return await request_json(
+        "POST", "/auth/login", json={"email": email.strip().lower(), "password": password}
+    )
 
 
 async def fetch_me(token: str) -> dict[str, Any]:
