@@ -1,0 +1,77 @@
+/* ==========================================================================
+   頁面樣式：問答輔助（pages/qa/index.html）
+   對應 HTML 原型：.qa-layout / .chat-card / .message / .ask-form / .source-choice
+   ========================================================================== */
+
+.qa-layout {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+}
+
+.chat__header {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.chat__messages {
+  display: grid;
+  gap: var(--space-3);
+  min-height: 240px;
+  max-height: 55vh;
+  padding: var(--space-3);
+  overflow-y: auto;
+  background-color: var(--color-bg-muted);
+  border-radius: var(--radius-md);
+}
+
+.chat__message {
+  max-width: 85%;
+  padding: var(--space-3) var(--space-4);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.chat__message--user {
+  justify-self: end;
+  color: var(--color-bg);
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.chat__sources {
+  margin-top: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.chat__form {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: 1fr auto;
+}
+
+.chat__summary {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.source-choice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) 0;
+}
+
+@media (width <= 800px) {
+  .qa-layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import BASE_DIR, Settings, settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging_config import setup_logging
-from app.routers import auth, health, home, invoices, robots
+from app.routers import auth, health, home, invoices, qa, robots
 
 
 def create_app(configuration: Settings | None = None) -> FastAPI:
@@ -37,6 +37,7 @@ def create_app(configuration: Settings | None = None) -> FastAPI:
     application.include_router(home.router)
     application.include_router(auth.router)
     application.include_router(invoices.router)
+    application.include_router(qa.router)
     return application
 
 

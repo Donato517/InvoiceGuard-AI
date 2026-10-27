@@ -1,0 +1,32 @@
+{#
+  @template pages/invoices/flow.html
+  @description 發票作業流程（前台負責步驟 1～3：上傳、AI 辨識、核對修正）。步驟 4～9 在 ADMIN。
+  @route GET /invoices/{invoice_id}/flow?step=1（需登入）
+  @context invoice: dict      API 回傳的發票資料
+  @context step: int          目前步驟（1～3）
+  @context steps: list[dict]  步驟列 [{number, label, state, url}]，state 為 active / done / locked
+  @context error: str | None  上一次送出失敗的訊息
+#}
+{% extends "layouts/default.html" %}
+{% block title %}發票作業{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ static_url('css/pages/invoice-flow.css') }}">
+{% endblock head %}
+{% block content %}
+  <div class="page-header">
+    <h1>{{ steps[step - 1].label }}</h1>
+    <a href="/invoices" class="btn btn--secondary">返回發票列表</a>
+  </div>
+  {% include "pages/invoices/_stepper.html" %}
+  {% if error %}<p class="alert alert--danger" role="alert">{{ error }}</p>{% endif %}
+  <section class="card" id="flow-step">
+    {# 各步驟內容放在 _flow_step_*.html，只負責呈現；驗證與狀態轉換由 router／API 處理 #}
+    {% if step == 1 %}
+      {% include "pages/invoices/_flow_step_upload.html" %}
+    {% elif step == 2 %}
+      {% include "pages/invoices/_flow_step_ocr.html" %}
+    {% else %}
+      {% include "pages/invoices/_flow_step_correct.html" %}
+    {% endif %}
+  </section>
+{% endblock content %}

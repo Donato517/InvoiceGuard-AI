@@ -124,3 +124,66 @@ def test_logout_clears_session_cookie(logged_in_client: TestClient) -> None:
 
     assert response.status_code == 303
     assert 'ig_session=""' in response.headers["set-cookie"]
+
+
+def test_qa_page_requires_login(client: TestClient) -> None:
+    response = client.get("/qa")
+    assert response.status_code == 303
+    assert "/login?next=" in response.headers["location"]
+
+
+def test_qa_page_renders_for_logged_in_user(logged_in_client: TestClient) -> None:
+    response = logged_in_client.get("/qa")
+    assert response.status_code == 200
+    assert "問答輔助" in response.text
+    assert "營業稅相關規定" in response.text
+
+
+def test_qa_ask_and_clear(logged_in_client: TestClient) -> None:
+    ask_res = logged_in_client.post(
+        "/qa/ask",
+        data={"question": "如何進行發票申報？"},
+    )
+    assert ask_res.status_code == 200
+    assert "如何進行發票申報？" in ask_res.text
+
+    clear_res = logged_in_client.post("/qa/clear")
+    assert clear_res.status_code == 303
+
+
+def test_qa_sources_toggle(logged_in_client: TestClient) -> None:
+    response = logged_in_client.post(
+        "/qa/sources",
+        data={"source_ids": ["tax", "voucher"]},
+    )
+    assert response.status_code == 200
+    assert "營業稅相關規定" in response.text
+
+
+def test_user_invoice_flow_steps(logged_in_client: TestClient) -> None:
+    for step in range(1, 4):
+        response = logged_in_client.get(f"/invoices/1/flow?step={step}")
+        assert response.status_code == 200
+        assert "發票作業" in response.text
+
+
+def test_user_invoice_flow_upload_and_correct(logged_in_client: TestClient) -> None:
+    upload_res = logged_in_client.post(
+        "/invoices/1/flow/upload",
+        files={"file": ("invoice_sample.jpg", b"fake-jpg-content", "image/jpeg")},
+    )
+    assert upload_res.status_code == 303
+    assert upload_res.headers["location"] == "/invoices/1/flow?step=2"
+
+    correct_res = logged_in_client.post(
+        "/invoices/1/flow/correct",
+        data={
+            "invoice_number": "AB12345678",
+            "invoice_date": "2026-08-15",
+            "seller_tax_id": "24681357",
+            "buyer_tax_id": "12345678",
+            "net_amount": 5000,
+        },
+    )
+    assert correct_res.status_code == 303
+    assert correct_res.headers["location"] == "/invoices"

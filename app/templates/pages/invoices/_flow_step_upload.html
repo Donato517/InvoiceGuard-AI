@@ -1,0 +1,26 @@
+{#
+  @template pages/invoices/_flow_step_upload.html
+  @description 步驟 1：上傳發票圖檔（HTML 原型 flowStep 0）。
+  @route POST /invoices/{invoice_id}/flow/upload（multipart，router 檢查類型與大小後呼叫 upload_invoice）
+  @context invoice: dict  發票資料；invoice.file_name 為已上傳的檔名
+#}
+<p class="alert alert--info">支援 JPG、PNG、PDF（20 MB 以下）。</p>
+<form method="post"
+      action="/invoices/{{ invoice.id }}/flow/upload"
+      enctype="multipart/form-data"
+      class="form">
+  <div class="dropzone">
+    <div class="dropzone__icon" aria-hidden="true">☁️</div>
+    <h2>選擇或拖曳發票檔案</h2>
+    <input id="invoice-file"
+           name="file"
+           type="file"
+           accept=".jpg,.jpeg,.png,.pdf"
+           required>
+  </div>
+  <p class="muted">
+    {% if invoice.file_name %}已上傳：{{ invoice.file_name }}{% else %}尚未選擇檔案{% endif %}
+  </p>
+  <button type="submit" class="btn btn--primary">上傳並開始辨識</button>
+</form>
+{# 原型的「使用示範發票」按鈕不搬：規範禁止用假資料代替實作 #}
