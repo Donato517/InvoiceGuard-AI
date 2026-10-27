@@ -658,6 +658,10 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoice_number: no }),
       });
+      if (res.redirected && res.url.includes('/login')) {
+        window.location.href = res.url;
+        return false;
+      }
       if (res.ok) {
         const data = await res.json();
         return data.duplicate === true;
@@ -877,6 +881,10 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
+          if (res.redirected && res.url.includes('/login')) {
+            window.location.href = res.url;
+            return;
+          }
           if (res.ok) {
             // 存入本機上傳紀錄快取
             const list = JSON.parse(localStorage.getItem('ig-mobile-uploads') || '[]');

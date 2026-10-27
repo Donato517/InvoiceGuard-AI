@@ -118,13 +118,15 @@ async def invoice_upload_page(request: Request, token: AccessToken) -> HTMLRespo
 
 
 @router.get("/mobile-upload", response_class=HTMLResponse)
-async def mobile_upload_page(request: Request) -> HTMLResponse:
+async def mobile_upload_page(request: Request, token: AccessToken) -> HTMLResponse:
     """手機端採購拍照上傳頁面（含即時邊界對齊與 90° 旋轉校正）。"""
     return templates.TemplateResponse(request, "pages/invoices/mobile_upload.html")
 
 
 @router.post("/check-duplicate")
-async def check_duplicate_invoice(payload: CheckDuplicateRequest) -> dict[str, bool]:
+async def check_duplicate_invoice(
+    payload: CheckDuplicateRequest, token: AccessToken
+) -> dict[str, bool]:
     """檢查發票單號是否已存在。"""
     num = payload.invoice_number.strip().upper()
     is_duplicate = any(
@@ -134,7 +136,7 @@ async def check_duplicate_invoice(payload: CheckDuplicateRequest) -> dict[str, b
 
 
 @router.post("/mobile-upload")
-async def mobile_upload_submit(payload: MobileUploadRequest) -> dict[str, Any]:
+async def mobile_upload_submit(payload: MobileUploadRequest, token: AccessToken) -> dict[str, Any]:
     """手機端確認上傳發票與校正後影像。"""
     new_id = max((int(inv["id"]) for inv in _CLIENT_INVOICES), default=0) + 1
     new_invoice = {

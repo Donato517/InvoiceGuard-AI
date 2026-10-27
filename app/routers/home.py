@@ -7,14 +7,24 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from app.core.security import get_session_token
 from app.core.templating import templates
 
 router = APIRouter(tags=["home"])
 
 
-@router.get("/", response_class=HTMLResponse)
-async def home(request: Request) -> HTMLResponse:
-    """首頁：產品介紹與上傳發票入口。"""
+def is_mobile_client(request: Request) -> bool:
+    """判斷請求是否來自行動裝置瀏覽器。"""
+    ua = request.headers.get("user-agent", "").lower()
+    return any(keyword in ua for keyword in ("mobile", "android", "iphone", "ipod"))
+
+
+@router.get("/", response_class=HTMLResponse, response_model=None)
+async def home(request: Request) -> HTMLResponse | RedirectResponse:
+    """首頁：未登入之手機端訪客自動導向登入頁；已登入或電腦端顯示首頁。"""
+    token = get_session_token(request)
+    if is_mobile_client(request) and token is None:
+        return RedirectResponse("/login?next=%2Finvoices%2Fmobile-upload", status_code=303)
     return templates.TemplateResponse(request, "pages/home/index.html")
 
 
