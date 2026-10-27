@@ -1,7 +1,7 @@
 """
 模組名稱：app.routers.invoices
-功能說明：我的發票——列表、上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
+功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-upload、POST /invoices/check-duplicate、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
     - 發票流程 1～3 步驟由前台採購端執行，後續步驟 4～9 轉由後台審核。
@@ -11,6 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel
 
 from app.clients import invoices as invoices_client
 from app.constants import INVOICE_FLOW_STEPS, INVOICE_STATUS_LABEL
@@ -92,10 +93,67 @@ async def invoice_list(
     )
 
 
+class CheckDuplicateRequest(BaseModel):
+    invoice_number: str
+
+
+class MobileUploadRequest(BaseModel):
+    invoice_number: str
+    invoice_date: str = ""
+    seller_tax_id: str = ""
+    buyer_tax_id: str = ""
+    net_amount: int = 0
+    tax_amount: int = 0
+    total_amount: int = 0
+    item_name: str = ""
+    file_name: str = "mobile_capture.jpg"
+    rotation: int = 0
+    use: str = ""
+
+
 @router.get("/upload", response_class=HTMLResponse)
 async def invoice_upload_page(request: Request, token: AccessToken) -> HTMLResponse:
     """上傳發票表單。"""
     return templates.TemplateResponse(request, "pages/invoices/upload.html")
+
+
+@router.get("/mobile-upload", response_class=HTMLResponse)
+async def mobile_upload_page(request: Request) -> HTMLResponse:
+    """手機端採購拍照上傳頁面（含即時邊界對齊與 90° 旋轉校正）。"""
+    return templates.TemplateResponse(request, "pages/invoices/mobile_upload.html")
+
+
+@router.post("/check-duplicate")
+async def check_duplicate_invoice(payload: CheckDuplicateRequest) -> dict[str, bool]:
+    """檢查發票單號是否已存在。"""
+    num = payload.invoice_number.strip().upper()
+    is_duplicate = any(
+        str(inv.get("invoice_number", "")).strip().upper() == num for inv in _CLIENT_INVOICES
+    )
+    return {"duplicate": is_duplicate}
+
+
+@router.post("/mobile-upload")
+async def mobile_upload_submit(payload: MobileUploadRequest) -> dict[str, Any]:
+    """手機端確認上傳發票與校正後影像。"""
+    new_id = max((int(inv["id"]) for inv in _CLIENT_INVOICES), default=0) + 1
+    new_invoice = {
+        "id": new_id,
+        "invoice_number": payload.invoice_number,
+        "invoice_date": payload.invoice_date,
+        "seller_tax_id": payload.seller_tax_id,
+        "buyer_tax_id": payload.buyer_tax_id,
+        "net_amount": payload.net_amount,
+        "tax_amount": payload.tax_amount,
+        "total_amount": payload.total_amount,
+        "item_name": payload.item_name,
+        "file_name": payload.file_name,
+        "rotation": payload.rotation,
+        "use": payload.use,
+        "ocr_status": "done",
+    }
+    _CLIENT_INVOICES.append(new_invoice)
+    return {"status": "ok", "invoice_id": new_id}
 
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)

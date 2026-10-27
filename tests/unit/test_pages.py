@@ -187,3 +187,61 @@ def test_user_invoice_flow_upload_and_correct(logged_in_client: TestClient) -> N
     )
     assert correct_res.status_code == 303
     assert correct_res.headers["location"] == "/invoices"
+
+
+def test_mobile_upload_page_renders(client: TestClient) -> None:
+    response = client.get("/invoices/mobile-upload")
+    assert response.status_code == 200
+    assert "採購拍照上傳" in response.text
+    assert "mobile-camera.css" in response.text
+    assert "mobile-camera.js" in response.text
+
+
+def test_mobile_upload_check_duplicate(client: TestClient) -> None:
+    res_dup = client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "ab12345678"},
+    )
+    assert res_dup.status_code == 200
+    assert res_dup.json() == {"duplicate": True}
+
+    res_unique = client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "ZZ99999999"},
+    )
+    assert res_unique.status_code == 200
+    assert res_unique.json() == {"duplicate": False}
+
+
+def test_mobile_upload_submit_and_check(client: TestClient) -> None:
+    payload = {
+        "invoice_number": "CD88889999",
+        "invoice_date": "2026-08-20",
+        "seller_tax_id": "87654321",
+        "buyer_tax_id": "12345678",
+        "net_amount": 5000,
+        "tax_amount": 250,
+        "total_amount": 5250,
+        "item_name": "伺服器硬碟",
+        "file_name": "procurement_cam.jpg",
+        "rotation": 90,
+        "use": "RD 部門採購設備",
+    }
+    submit_res = client.post("/invoices/mobile-upload", json=payload)
+    assert submit_res.status_code == 200
+    data = submit_res.json()
+    assert data["status"] == "ok"
+    assert "invoice_id" in data
+
+    dup_res = client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "CD88889999"},
+    )
+    assert dup_res.status_code == 200
+    assert dup_res.json() == {"duplicate": True}
+
+
+def test_mobile_upload_shortcut(client: TestClient) -> None:
+    response = client.get("/mobile-upload", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/invoices/mobile-upload"
