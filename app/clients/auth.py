@@ -17,7 +17,9 @@ async def login(email: str, password: str) -> dict[str, Any]:
     Raises:
         ApiError: 帳號密碼錯誤（401）或其他 API 錯誤。
     """
-    return await request_json("POST", "/auth/login", json={"email": email, "password": password})
+    return await request_json(
+        "POST", "/auth/login", json={"email": email.strip().lower(), "password": password}
+    )
 
 
 async def fetch_me(token: str) -> dict[str, Any]:

@@ -1,0 +1,27 @@
+{#
+  @template pages/qa/_source_picker.html
+  @description 部門問答知識庫勾選清單；勾選即儲存（POST /qa/sources），失敗保留原設定。
+  @context knowledge_bases: list[dict]  [{assignment_id, title, selected}]
+#}
+<form id="source-picker"
+      method="post"
+      action="/qa/sources"
+      hx-post="/qa/sources"
+      hx-trigger="change"
+      hx-target="#source-picker"
+      hx-swap="outerHTML">
+  {% for kb in knowledge_bases %}
+    <label class="source-choice">
+      <input type="checkbox"
+             name="source_ids"
+             value="{{ kb.assignment_id }}"
+             {% if kb.selected %}checked{% endif %}>
+      {{ kb.title }}
+    </label>
+  {% else %}
+    <p class="empty-state">此部門尚無知識庫</p>
+  {% endfor %}
+  <noscript>
+    <button type="submit" class="btn">儲存</button>
+  </noscript>
+</form>

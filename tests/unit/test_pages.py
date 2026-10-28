@@ -124,3 +124,152 @@ def test_logout_clears_session_cookie(logged_in_client: TestClient) -> None:
 
     assert response.status_code == 303
     assert 'ig_session=""' in response.headers["set-cookie"]
+
+
+def test_qa_page_requires_login(client: TestClient) -> None:
+    response = client.get("/qa")
+    assert response.status_code == 303
+    assert "/login?next=" in response.headers["location"]
+
+
+def test_qa_page_renders_for_logged_in_user(logged_in_client: TestClient) -> None:
+    response = logged_in_client.get("/qa")
+    assert response.status_code == 200
+    assert "問答輔助" in response.text
+    assert "營業稅相關規定" in response.text
+
+
+def test_qa_ask_and_clear(logged_in_client: TestClient) -> None:
+    ask_res = logged_in_client.post(
+        "/qa/ask",
+        data={"question": "如何進行發票申報？"},
+    )
+    assert ask_res.status_code == 200
+    assert "如何進行發票申報？" in ask_res.text
+
+    clear_res = logged_in_client.post("/qa/clear")
+    assert clear_res.status_code == 303
+
+
+def test_qa_sources_toggle(logged_in_client: TestClient) -> None:
+    response = logged_in_client.post(
+        "/qa/sources",
+        data={"source_ids": ["tax", "voucher"]},
+    )
+    assert response.status_code == 200
+    assert "營業稅相關規定" in response.text
+
+
+def test_user_invoice_flow_steps(logged_in_client: TestClient) -> None:
+    for step in range(1, 4):
+        response = logged_in_client.get(f"/invoices/1/flow?step={step}")
+        assert response.status_code == 200
+        assert "發票作業" in response.text
+
+
+def test_user_invoice_flow_upload_and_correct(logged_in_client: TestClient) -> None:
+    upload_res = logged_in_client.post(
+        "/invoices/1/flow/upload",
+        files={"file": ("invoice_sample.jpg", b"fake-jpg-content", "image/jpeg")},
+    )
+    assert upload_res.status_code == 303
+    assert upload_res.headers["location"] == "/invoices/1/flow?step=2"
+
+    correct_res = logged_in_client.post(
+        "/invoices/1/flow/correct",
+        data={
+            "invoice_number": "AB12345678",
+            "invoice_date": "2026-08-15",
+            "seller_tax_id": "24681357",
+            "buyer_tax_id": "12345678",
+            "net_amount": 5000,
+        },
+    )
+    assert correct_res.status_code == 303
+    assert correct_res.headers["location"] == "/invoices"
+
+
+def test_mobile_upload_requires_login(client: TestClient) -> None:
+    get_res = client.get("/invoices/mobile-upload")
+    assert get_res.status_code == 303
+    assert get_res.headers["location"] == "/login?next=%2Finvoices%2Fmobile-upload"
+
+    dup_res = client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "AB12345678"},
+    )
+    assert dup_res.status_code == 303
+
+    upload_res = client.post(
+        "/invoices/mobile-upload",
+        json={"invoice_number": "AB12345678"},
+    )
+    assert upload_res.status_code == 303
+
+
+def test_mobile_user_home_redirects_to_login(client: TestClient) -> None:
+    response = client.get(
+        "/",
+        headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X)"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login?next=%2Finvoices%2Fmobile-upload"
+
+
+def test_mobile_upload_page_renders(logged_in_client: TestClient) -> None:
+    response = logged_in_client.get("/invoices/mobile-upload")
+    assert response.status_code == 200
+    assert "採購拍照上傳" in response.text
+    assert "mobile-camera.css" in response.text
+    assert "mobile-camera.js" in response.text
+
+
+def test_mobile_upload_check_duplicate(logged_in_client: TestClient) -> None:
+    res_dup = logged_in_client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "ab12345678"},
+    )
+    assert res_dup.status_code == 200
+    assert res_dup.json() == {"duplicate": True}
+
+    res_unique = logged_in_client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "ZZ99999999"},
+    )
+    assert res_unique.status_code == 200
+    assert res_unique.json() == {"duplicate": False}
+
+
+def test_mobile_upload_submit_and_check(logged_in_client: TestClient) -> None:
+    payload = {
+        "invoice_number": "CD88889999",
+        "invoice_date": "2026-08-20",
+        "seller_tax_id": "87654321",
+        "buyer_tax_id": "12345678",
+        "net_amount": 5000,
+        "tax_amount": 250,
+        "total_amount": 5250,
+        "item_name": "伺服器硬碟",
+        "file_name": "procurement_cam.jpg",
+        "rotation": 90,
+        "use": "RD 部門採購設備",
+    }
+    submit_res = logged_in_client.post("/invoices/mobile-upload", json=payload)
+    assert submit_res.status_code == 200
+    data = submit_res.json()
+    assert data["status"] == "ok"
+    assert "invoice_id" in data
+
+    dup_res = logged_in_client.post(
+        "/invoices/check-duplicate",
+        json={"invoice_number": "CD88889999"},
+    )
+    assert dup_res.status_code == 200
+    assert dup_res.json() == {"duplicate": True}
+
+
+def test_mobile_upload_shortcut(client: TestClient) -> None:
+    response = client.get("/mobile-upload", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/invoices/mobile-upload"

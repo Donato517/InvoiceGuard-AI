@@ -1,0 +1,67 @@
+{#
+  @template pages/qa/index.html
+  @description 問答輔助：智慧問答 + 部門的知識庫選擇（HTML 原型 renderChat，使用者視角）。
+  @route GET /qa（需登入）
+  @context messages: list[dict]         對話 [{role, text, sources}]，role 為 user / assistant
+  @context knowledge_bases: list[dict]  本部門可用的知識庫 [{assignment_id, title, selected}]
+  @context quick_questions: list[str]   快速提問
+#}
+{% extends "layouts/default.html" %}
+{% block title %}問答輔助{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ static_url('css/pages/qa.css') }}">
+{% endblock head %}
+{% block content %}
+  <div class="page-header">
+    <div>
+      <h1>問答輔助</h1>
+      <p class="muted">勾選後自動儲存；只檢索部門選用、文件已核准且索引完成的內容。</p>
+    </div>
+  </div>
+  <div class="qa-layout">
+    <section class="card">
+      <div class="chat__header">
+        <h2 class="card__title">💬 智慧問答</h2>
+        <form method="post" action="/qa/clear">
+          <button type="submit" class="btn btn--secondary btn--small">清除對話</button>
+        </form>
+      </div>
+      <div id="chat-messages"
+           class="chat__messages"
+           role="log"
+           aria-live="polite">{% include "pages/qa/_chat_messages.html" %}</div>
+      <div class="chip-list">
+        {% for question in quick_questions %}
+          <form method="post"
+                action="/qa/ask"
+                hx-post="/qa/ask"
+                hx-target="#chat-messages"
+                hx-swap="innerHTML">
+            <input type="hidden" name="question" value="{{ question }}">
+            <button type="submit" class="chip">{{ question }}</button>
+          </form>
+        {% endfor %}
+      </div>
+      <form class="chat__form"
+            method="post"
+            action="/qa/ask"
+            hx-post="/qa/ask"
+            hx-target="#chat-messages"
+            hx-swap="innerHTML"
+            hx-on::after-request="this.reset()">
+        <textarea name="question"
+                  rows="2"
+                  maxlength="2000"
+                  placeholder="輸入問題……"
+                  aria-label="問題"
+                  required></textarea>
+        <button type="submit" class="btn btn--primary">送出</button>
+      </form>
+      <p class="chat__summary">已選用 {{ knowledge_bases | selectattr("selected") | list | length }} / {{ knowledge_bases | length }} 個知識庫。</p>
+    </section>
+    <aside class="card">
+      <h2 class="card__title">📚 問答知識庫選擇</h2>
+      {% include "pages/qa/_source_picker.html" %}
+    </aside>
+  </div>
+{% endblock content %}

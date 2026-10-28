@@ -1,0 +1,37 @@
+{#
+  @template pages/invoices/_flow_step_ocr.html
+  @description 步驟 2：AI 辨識結果預覽（HTML 原型 flowStep 1）。
+  @context invoice: dict  invoice.ocr_status 為 pending / done / failed；其餘欄位同 API InvoiceRead
+#}
+{% if invoice.ocr_status == "done" %}
+  <div class="invoice-preview">
+    <h2>統一發票（三聯式）</h2>
+    號碼：{{ invoice.invoice_number }}
+    <br>
+    日期：{{ invoice.invoice_date }}
+    <br>
+    賣方統編：{{ invoice.seller_tax_id }}
+    <br>
+    買方統編：{{ invoice.buyer_tax_id }}
+    <br>
+    未稅金額：{{ invoice.net_amount | currency }}
+    <br>
+    稅額：{{ invoice.tax_amount | currency }}
+    <br>
+    總額：{{ invoice.total_amount | currency }}
+  </div>
+  <p class="flow-footer">
+    <a href="/invoices/{{ invoice.id }}/flow?step=3" class="btn btn--primary">下一步：核對修正</a>
+  </p>
+{% elif invoice.ocr_status == "failed" %}
+  <p class="alert alert--danger" role="alert">辨識失敗，請重新上傳或改以手動輸入。</p>
+{% else %}
+  {# 辨識中：HTMX 每 3 秒重新整理此區塊，完成後自動顯示結果 #}
+  <p class="alert alert--info"
+     hx-get="/invoices/{{ invoice.id }}/flow?step=2"
+     hx-trigger="every 3s"
+     hx-target="#flow-step"
+     hx-select="#flow-step"
+     hx-swap="outerHTML">辨識進行中…</p>
+{% endif %}
+{# TODO: OCR／模型尚未串接（DEVELOPMENT_STATUS：模型整合尚未串接），串接前 ocr_status 不得假裝為 done #}

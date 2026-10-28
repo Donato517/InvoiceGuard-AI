@@ -21,3 +21,16 @@ INVOICE_STATUS_LABEL: dict[str, str] = {
     "flagged": "有風險",
     "rejected": "異常",
 }
+
+# 發票作業 9 個步驟（對應 HTML 原型 STEPS）
+INVOICE_FLOW_STEPS: list[str] = [
+    "採購上傳發票",
+    "AI OCR 辨識",
+    "採購核對修正",
+    "系統自動檢核",
+    "財務審核",
+    "產生申報檔",
+    "匯入國稅局軟體",
+    "自動產生傳票",
+    "匯出結果",
+]

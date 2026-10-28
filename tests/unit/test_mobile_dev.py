@@ -622,3 +622,9 @@ def test_wrong_site_login_stays_in_original_form_without_popup(
     assert "合成帳密錯誤" in response.text
     assert "www-authenticate" not in response.headers
     assert "synthetic-only" not in response.text
+
+
+def test_mobile_dev_upload_redirect(mobile_client: TestClient) -> None:
+    response = mobile_client.get("/mobile/upload", auth=("dev", CODE))
+    assert response.status_code == 303
+    assert response.headers["location"] == "/invoices/mobile-upload"
