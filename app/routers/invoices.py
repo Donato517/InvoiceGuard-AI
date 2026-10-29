@@ -1,24 +1,32 @@
 """
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-upload、POST /invoices/check-duplicate、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/mobile-upload、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
+    - 手機上傳的辨識、查重、送出由頁面 JS 以 fetch（Accept: application/json）呼叫，本站轉呼叫 API 並回 JSON；
+      錯誤（含 Session 核對與 Origin 檢查）由全域處理器回 JSON，Session 失效時（401）仍導向登入頁。
     - 發票流程 1～3 步驟由前台採購端執行，後續步驟 4～9 轉由後台審核。
 """
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.clients import invoices as invoices_client
 from app.constants import INVOICE_FLOW_STEPS, INVOICE_STATUS_LABEL
 from app.core.deps import AccessToken
+from app.core.security import verify_same_origin
 from app.core.templating import templates
+from app.routers.auth import require_session
 
-router = APIRouter(prefix="/invoices", tags=["invoices"])
+# 全部發票頁面需登入：每次經 API 核對 Session
+router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(require_session)])
+
+# 手機上傳影像上限：與 API 相同（Vercel 請求本文上限 4.5 MB），頁面會先縮圖
+MAX_MOBILE_IMAGE_BYTES = 4 * 1024 * 1024
 
 # 示範前台發票記憶體資料
 _CLIENT_INVOICES: list[dict[str, Any]] = [
@@ -94,68 +102,109 @@ async def invoice_list(
 
 
 class CheckDuplicateRequest(BaseModel):
-    invoice_number: str
+    """查重條件（字軌＋號碼＋賣方統編）；格式由 API 驗證。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_track: str = Field(max_length=2)
+    invoice_number: str = Field(max_length=8)
+    seller_tax_id: str = Field(max_length=8)
+
+
+class MobileUploadItem(BaseModel):
+    """核對後的一筆品名明細；source_line_no 為對應的 AI 辨識明細序號（新增的明細為 None）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_line_no: int | None = Field(default=None, ge=1, le=50)
+    item_name: str = Field(max_length=200)
+    quantity: str | None = Field(default=None, max_length=30)
+    unit_price: str | None = Field(default=None, max_length=30)
+    line_amount: str = Field(max_length=30)
+
+
+class MobileUploadChange(BaseModel):
+    """核對頁的一次欄位修改（依時間順序）；API 據以保存修改歷程。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_scope: str = Field(max_length=10)
+    line_no: int | None = Field(default=None, ge=1, le=50)
+    field_name: str = Field(max_length=40)
+    old_value: str | None = Field(default=None, max_length=200)
+    new_value: str | None = Field(default=None, max_length=200)
 
 
 class MobileUploadRequest(BaseModel):
-    invoice_number: str
-    invoice_date: str = ""
-    seller_tax_id: str = ""
-    buyer_tax_id: str = ""
-    net_amount: int = 0
-    tax_amount: int = 0
-    total_amount: int = 0
-    item_name: str = ""
-    file_name: str = "mobile_capture.jpg"
-    rotation: int = 0
-    use: str = ""
+    """核對、查重後送出的發票；欄位對應 API POST /invoices，格式與業務規則由 API 驗證。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recognition_id: str = Field(max_length=36)
+    invoice_track: str = Field(max_length=2)
+    invoice_number: str = Field(max_length=8)
+    invoice_date: str = Field(max_length=10)
+    seller_tax_id: str = Field(max_length=8)
+    seller_name: str | None = Field(default=None, max_length=200)
+    buyer_tax_id: str | None = Field(default=None, max_length=8)
+    buyer_name: str | None = Field(default=None, max_length=200)
+    tax_type: str = Field(max_length=20)
+    sales_amount: str = Field(max_length=30)
+    tax_amount: str = Field(max_length=30)
+    total_amount: str = Field(max_length=30)
+    total_amount_zh: str | None = Field(default=None, max_length=200)
+    items: list[MobileUploadItem] = Field(max_length=50)
+    changes: list[MobileUploadChange] = Field(default_factory=list, max_length=500)
 
 
 @router.get("/upload", response_class=HTMLResponse)
 async def invoice_upload_page(request: Request, token: AccessToken) -> HTMLResponse:
-    """上傳發票表單。"""
-    return templates.TemplateResponse(request, "pages/invoices/upload.html")
+    """上傳發票（電腦選檔）：本機 JPG／PNG 影像或單頁 PDF，流程與手機拍照頁相同。"""
+    return templates.TemplateResponse(
+        request, "pages/invoices/upload.html", {"upload_mode": "file"}
+    )
 
 
 @router.get("/mobile-upload", response_class=HTMLResponse)
 async def mobile_upload_page(request: Request, token: AccessToken) -> HTMLResponse:
     """手機端採購拍照上傳頁面（含即時邊界對齊與 90° 旋轉校正）。"""
-    return templates.TemplateResponse(request, "pages/invoices/mobile_upload.html")
+    return templates.TemplateResponse(
+        request, "pages/invoices/mobile_upload.html", {"upload_mode": "camera"}
+    )
 
 
-@router.post("/check-duplicate")
+@router.post("/mobile-recognize", dependencies=[Depends(verify_same_origin)], response_model=None)
+async def mobile_recognize(
+    token: AccessToken, file: Annotated[UploadFile, File()]
+) -> dict[str, Any] | JSONResponse:
+    """辨識（手機拍照頁與電腦上傳頁共用）：把影像或單頁 PDF 轉給 API（存檔、OCR、AI 整理欄位），回傳 API 的辨識 JSON。"""
+    content = await file.read(MAX_MOBILE_IMAGE_BYTES + 1)
+    if len(content) > MAX_MOBILE_IMAGE_BYTES:
+        error = {
+            "code": "INVOICE_IMAGE_TOO_LARGE",
+            "message": "檔案超過 4 MB，請重新拍攝或改選較小的檔案",
+        }
+        return JSONResponse({"error": error}, status_code=400)
+    return await invoices_client.recognize_invoice(
+        token,
+        filename=file.filename or "mobile_capture.jpg",
+        content=content,
+        content_type=file.content_type or "application/octet-stream",
+    )
+
+
+@router.post("/check-duplicate", dependencies=[Depends(verify_same_origin)], response_model=None)
 async def check_duplicate_invoice(
     payload: CheckDuplicateRequest, token: AccessToken
-) -> dict[str, bool]:
-    """檢查發票單號是否已存在。"""
-    num = payload.invoice_number.strip().upper()
-    is_duplicate = any(
-        str(inv.get("invoice_number", "")).strip().upper() == num for inv in _CLIENT_INVOICES
-    )
-    return {"duplicate": is_duplicate}
+) -> dict[str, Any]:
+    """查重：經 API 確認字軌＋號碼＋賣方統編是否已存在。"""
+    return await invoices_client.check_duplicate(token, **payload.model_dump())
 
 
-@router.post("/mobile-upload")
+@router.post("/mobile-upload", dependencies=[Depends(verify_same_origin)], response_model=None)
 async def mobile_upload_submit(payload: MobileUploadRequest, token: AccessToken) -> dict[str, Any]:
-    """手機端確認上傳發票與校正後影像。"""
-    new_id = max((int(inv["id"]) for inv in _CLIENT_INVOICES), default=0) + 1
-    new_invoice = {
-        "id": new_id,
-        "invoice_number": payload.invoice_number,
-        "invoice_date": payload.invoice_date,
-        "seller_tax_id": payload.seller_tax_id,
-        "buyer_tax_id": payload.buyer_tax_id,
-        "net_amount": payload.net_amount,
-        "tax_amount": payload.tax_amount,
-        "total_amount": payload.total_amount,
-        "item_name": payload.item_name,
-        "file_name": payload.file_name,
-        "rotation": payload.rotation,
-        "use": payload.use,
-        "ocr_status": "done",
-    }
-    _CLIENT_INVOICES.append(new_invoice)
-    return {"status": "ok", "invoice_id": new_id}
+    """手機端確認上傳：經 API 建立發票（待單位核准）並標記使用者修改的欄位；影像沿用辨識時保存的檔案。"""
+    return await invoices_client.submit_invoice(token, payload.model_dump())
 
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)

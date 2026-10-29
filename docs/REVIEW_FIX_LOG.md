@@ -329,3 +329,60 @@
 - 問題：程式註解把 Vercel 模組 `app/integrations/supabase_storage.py` 寫成「只供本機開發檔案頁使用」，把未接線的 `storage_client` 寫成正式檔案流程，`/dev/files` 寫成「非正式範例」，形成「示範一套、正式一套」的錯誤說法。
 - 處理（只改註解與文件，不改程式行為）：`supabase_storage.py`（ADMIN／API 相同，加使用方式與 `from_settings` 的 Raises）、`storage_client.py`（ADMIN／API 相同，註明為未接線的第一階段契約）、`file_utils.py`（三站相同，留存檔案改指 Vercel 模組，前台交給 API）、ADMIN `routers/dev_files.py`、`services/dev_file_service.py`、API `services/invoice_service.py`；ADMIN／API `docs/MODULE_CONTRACT.md`「匯入方式」補上 `from app.integrations.supabase_storage import S3StorageClient`。
 - 驗證：三站 check_project（單站與 `--project-root`）PASS；pytest 前台 350／ADMIN 636／API 485 passed；ruff check／format --check、`app.core.environment --check`、djlint 通過；相同檔逐位元組一致。
+
+## 2026-10-28 Claude：登入／登出串接 API v1.3 Session
+
+- 範圍：clients/auth.py、routers/auth.py、core/security.py、core/deps.py 說明、invoices／qa 路由相依、頁首、測試 fixture 與文件。
+- **中｜需登入頁只看 cookie 是否存在**：舊 require_login 不核對 Session，與 v1.3 後續接線第 3 點「不可只依賴舊 Cookie」不符；登出也只清 cookie，不讓 API 端失效。修正：routers/auth.py 新增 `require_session`，經 API /auth/me 核對（core 不可依賴 clients，故放在 router 層），掛在 /invoices、/qa；登出呼叫 API 撤銷 Session；登入成功後撤銷瀏覽器原有的舊 Session；cookie 有效秒數取 API 回傳值與 SESSION_MAX_AGE_SECONDS 較小者。
+- `logged_in_client` fixture 改為同時替身 API /auth/me（契約改變所需），另補 Session 失效導回登入頁的負向測試。
+- 驗證：check_project PASS；pytest 374 passed、54 skipped（皆為前台不適用的治理測試）；ruff、djLint（24 檔 0 errors）、environment --check 通過。
+- 未驗：與真實 API／DB 的端到端登入、手機 HTTPS 實機。
+
+## 2026-10-28 Claude：共同規範「本機例外」擴充（Google Document AI／Gemini）
+
+- 依使用者核定：START 注入站程序的雲端設定是必要設定，不視為本機禁用機密；API 另注入 GOOGLE_CLOUD_PROJECT_ID、GOOGLE_CLOUD_LOCATION、DOCUMENT_AI_PROCESSOR_ID、GOOGLE_SERVICE_ACCOUNT_JSON、GEMINI_API_KEY。本站未注入這些值，程式未改。
+- 同步：AGENTS.md 共同區塊、docs/DEVELOPMENT_STATUS.md「本機雲端設定」、docs/ENVIRONMENT_ISOLATION.md；共同區塊 SHA-256 依 PROJECT_CHECKS.md 寫入 contracts/project-contract.json 的 agent_rules_sha256（三站相同）。
+- 驗證：check_project（--project-root）PASS；本站完整 pytest 通過（見同日 API REVIEW_FIX_LOG 數字）。
+- Codex 檢驗 P3（同日）：ENVIRONMENT_ISOLATION.md 補列 API 的五項 Google 設定（只給 API），並把「ADMIN 本機無法登入」限縮為依 SESSION_SECRET_KEY 簽署的舊 require_admin cookie 登入。
+- 狀態文件：依使用者 2026-10-28 手機實測，前台登入改記為「實測登入成功」。
+- 2026-10-28 續：共同規範「本機例外」加入 START 只注入 API 的 GROQ_API_KEY；DEVELOPMENT_STATUS、ENVIRONMENT_ISOLATION 同步，agent_rules_sha256 更新（三站相同）。本站程式未改。
+
+## 2026-10-29 Claude：手機上傳 JSON 錯誤與使用者修改欄位標記
+
+- **Codex P2｜Session 預檢失敗時手機 POST 回 HTML**：require_session 在路由之前呼叫 API /auth/me，錯誤由全域處理器回錯誤頁，路由內的 JSON 轉換接不到。改為 core/exceptions.py 依 `Accept: application/json` 回 JSON（ApiError、Origin 檢查失敗、格式錯誤、未預期錯誤），401 仍導向登入；手機頁 fetch 一律帶此標頭，路由移除各自的 try/except。格式錯誤的 JSON 只列欄位位置與類型，不回傳輸入值。回歸：/auth/me 503 時三個 POST 皆回 JSON 502、401 仍 303、跨站 Origin 回 JSON 403、422 不含輸入內容。
+- 使用者需求：核對頁標記使用者修改過的欄位並送到後台標示。mobile-camera.js 以與 API 相同的比對規則判斷是否修改，即時標示並記錄每次修改；字軌、號碼拆成兩欄；送出內容加 `items[].source_line_no` 與 `changes`（本站 MobileUploadRequest 同步、仍 extra=forbid）。
+- 驗證：見 TEST_REPORT.md 同日紀錄。
+
+## 2026-10-29 Claude：Codex 第二輪檢驗修正（前台）
+
+- **P2｜Accept 錯誤格式仍有缺口**：一般請求（非 JSON）的格式錯誤原本走 FastAPI 預設處理，回 422 JSON 且含輸入值（例如登入表單的 Email）；`Accept: application/json` 的不存在路由回 HTML。改為：非 JSON 的格式錯誤顯示錯誤頁、不回輸入值；HTTPException（404／405 等）依 Accept 回 JSON（code 同 API 的 NOT_FOUND／METHOD_NOT_ALLOWED）或原本的錯誤頁。回歸：登入表單缺欄位回 422 HTML 且不含 Email、不存在路由兩種格式。
+- **P2｜修改紀錄超過 500 筆被壓縮**：mobile-camera.js 移除 compactChanges，超過上限時不送出並提示重新辨識。
+- **P2｜比對規則一致性**：canonicalValue 改用明列的空白集合 SPACE_CHARS（與 API WHITESPACE 相同），不依賴各語言的 \s／trim() 定義；數字仍以字串處理。與 API 對照 17,325 組差異 0。
+- 驗證：見 TEST_REPORT.md 同日紀錄。
+
+## 2026-10-29 Claude：Codex 第三輪複查（前台文件）
+
+- Codex 確認第二輪 4 項 P2、1 項 P3 皆已修正（比對規則擴充至 56,150 組差異 0）。
+- **P3｜docs/ARCHITECTURE.md 仍寫「API 上傳端點尚未實作」**：改為分列已實作的手機發票影像（只在記憶體轉給 API，由 API 存入 invoices bucket）與尚未接線的通用檔案上傳；JavaScript 列補上 mobile-camera.js 只呼叫本站端點、由本站經 app/clients 轉呼叫 API。
+- 驗證：check_project（--project-root）PASS；pytest 392 passed、54 skipped。
+- 同日續（Codex 文件複查）：上一筆寫的「只在記憶體轉給 API、不存於暫存檔」不精確——本站程式不主動保存，但 Starlette 接收上傳時以 SpooledTemporaryFile 暫存，超過 1 MiB 會寫入系統暫存檔、請求結束時刪除。ARCHITECTURE.md 第 4 節已改為如實描述。check_project（--project-root）PASS。
+
+## 2026-10-29 Claude：Codex 檢驗電腦上傳頁（前台）
+
+- **P2｜換檔後舊辨識回應套到新檔案**：辨識 A 進行中按「重新選擇檔案」改選 B，A 的回應抵達後顯示 B 的預覽與 A 的欄位。原因：回應套用前沒有確認仍是同一個檔案。修正：mobile-camera.js 加 imageVersion，每次換檔（setImage／releaseImage）+1 並重設辨識按鈕；辨識在縮圖完成、回應抵達、發生錯誤時都比對版本，不同即丟棄，不套用欄位、不跳步驟、不提示錯誤；旋轉的非同步結果也確認仍是同一檔案才寫回。
+- **P3｜電腦上傳頁 Session 失效後登入返回手機頁**：登入返回路徑寫死 /invoices/mobile-upload。改為返回目前頁面（window.location.pathname）。
+- 驗證：見 TEST_REPORT.md 同日紀錄。
+
+## 2026-10-29 Claude：Codex 複查電腦上傳頁（換檔競態補完）
+
+- **P2｜舊辨識的登入轉址讓新檔案頁面跳走**：sendRequest 在回應抵達時先做登入轉址、呼叫端才比對版本。改為 sendRequest 接受 isCurrent，回應抵達時請求已失效就直接回 null，不做登入轉址等任何副作用；辨識傳入版本比對。
+- **P2｜手機按「重拍」時沒有立即作廢舊辨識**：重拍原本直接開相機，拍到新照片前版本號不變。改為重拍與重新選擇共用同一處理：先 releaseImage（版本 +1、辨識按鈕恢復），回到第一步，手機頁再開相機；取消相機時停在第一步。
+- **P2｜延遲的 FileReader 回呼覆蓋後選檔案**：選檔當下（通過格式檢查後）先 releaseImage 並記下版本，讀檔完成時版本不同即丟棄；之後再選檔、選 PDF、拍照或用示範發票都會讓先前的讀檔作廢。
+- 瀏覽器實跑（以前台實際渲染的兩個頁面，替身登入、可手動放行的假辨識、相機替身，不連任何服務）：電腦頁辨識 A 中改選 B，A 晚到的登入轉址不跳頁；A.png 與 B.pdf 先後選取顯示 B、反向顯示 A；手機頁辨識中按重拍，相機開啟期間舊辨識的成功、HTTP 錯誤、連線失敗三種回應都不產生欄位、不提示，按鈕立即恢復；正常辨識流程仍進入核對頁。
+- 驗證：三站 check_project（--project-root）PASS；pytest API 716／前台 395／ADMIN 1193 passed；ruff、environment --check 通過；djLint 25 檔 0 錯誤；`node --check` 通過。
+
+## 2026-10-29 Claude：上傳完成後「查看發票清單」出現 405
+
+- 問題：使用者上傳完成後按「查看發票清單」進入 /invoices，畫面顯示 405 Method Not Allowed。原因：發票列表頁尚未規劃，API 的 GET /api/v1/invoices 仍是 TODO；同一路徑目前只有送出用的 POST，所以 GET 回 405。
+- 處理（依使用者指示）：先隱藏上傳結果步驟的「查看發票清單」按鈕（共用片段 _upload_review_steps.html，手機拍照頁與電腦上傳頁都適用），只留「繼續上傳／拍攝下一張」。頁首「我的發票」連結同樣指向 /invoices，未更動，待使用者決定。
+- 回歸：test_pages 兩個上傳頁都不含「查看發票清單」。check_project PASS；pytest 397 passed、54 skipped；ruff、djLint 通過。

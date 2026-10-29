@@ -85,7 +85,7 @@ InvoiceGuard-AI/
 │   │   ├── robots.py             #   GET /robots.txt（內容取自 core/constants.py；不收錄靠 noindex）
 │   │   ├── home.py               #   GET /
 │   │   ├── auth.py               #   GET/POST /login、POST /logout
-│   │   ├── invoices.py           #   /invoices、/invoices/upload、/invoices/{id}
+│   │   ├── invoices.py           #   /invoices、/invoices/upload、/invoices/mobile-*（手機上傳）、/invoices/{id}
 │   │   └── mobile_dev.py         #   手機開發驗證與 loopback API 橋接（只由 app/mobile_dev.py 掛載）
 │   ├── templates/                # ★ Jinja2 樣板（HTML）
 │   │   ├── base.html             #   HTML 骨架（<head>、全站 css / js、noindex）
@@ -138,13 +138,14 @@ InvoiceGuard-AI/
 | 樣板用的格式化 | `app/utils/format.py` | 在 `core/templating.py` 註冊為 filter |
 | 常數 / 狀態文字 | `app/constants.py` | 禁止在程式或樣板中寫魔術字串 |
 | CSS | `app/static/css/` | 設計變數在 `variables.css`，共用元件在 `components.css` |
-| JavaScript | `app/static/js/main.js` | 全站共用小型互動；手機開發驗證使用既有 `mobile-dev.js`，不能擴張成繞過授權的 API 用戶端 |
+| JavaScript | `app/static/js/main.js` | 全站共用小型互動；手機開發驗證使用既有 `mobile-dev.js`，不能擴張成繞過授權的 API 用戶端；手機拍照頁與電腦上傳頁共用 `mobile-camera.js`（以 data-upload-mode 區分 camera／file），只呼叫本站 `/invoices/mobile-*` 與 `/invoices/check-duplicate`，由本站經 `app/clients` 轉呼叫 API |
 | 第三方 JS / CSS | `app/static/js/vendor/` | 原樣引入，版本記錄於該資料夾 README |
 | 圖片 | `app/static/img/` | |
 | SVG 圖示、favicon | `app/static/icons/` | |
 | 字型 | `app/static/fonts/` | |
 | 處理中的暫存檔 | 本機 `tmp/`、Vercel `/tmp/invoiceguard` | 一律用 `app.utils.file_utils.temp_file_path()`，用完自動刪除 |
-| 使用者上傳的原始檔 | 不存在本網站 | 目標為轉交 API 存入 Supabase Storage（API 上傳端點尚未實作）；不存於靜態目錄 |
+| 手機拍照與電腦上傳的發票影像／單頁 PDF（已實作，2026-10-29） | 不存在本網站 | `/invoices/mobile-recognize` 把上傳內容讀成 bytes 後轉給 API `/api/v1/invoices/recognize`，由 API 存入 invoices bucket；送出時沿用同一影像。本站程式不主動保存影像、不寫入靜態目錄；但框架接收上傳時使用 Starlette 的 `SpooledTemporaryFile`，超過 1 MiB 會暫存到系統暫存檔，請求結束時關閉並刪除 |
+| 其他使用者上傳檔 | 不存在本網站 | 目標為轉交 API 存入 Supabase Storage；API 的通用檔案上傳（FileService）尚未接線；不存於靜態目錄 |
 
 ---
 
@@ -175,7 +176,7 @@ InvoiceGuard-AI/
 | `DEBUG` | 日誌輸出 DEBUG 等級 | `true` |
 | `API_BASE_URL` | InvoiceGuard-AI-API 位址（含 `/api/v1`） | 本機由 START 注入（日常 `http://127.0.0.1:8100/api/v1`）；雲端必填 |
 | `API_TIMEOUT_SECONDS` | 呼叫 API 的逾時秒數 | `30` |
-| `SESSION_MAX_AGE_SECONDS` | 登入 cookie 有效秒數，應與 API 的 token 有效期一致 | `3600` |
+| `SESSION_MAX_AGE_SECONDS` | 登入 cookie 有效秒數上限；實際取此值與 API 回傳的 Session 有效秒數較小者 | `3600` |
 | `LOCAL_HTTPS_ORIGIN` / `LOCAL_MOBILE_ORIGIN_FILE` / `LOCAL_MOBILE_ACCESS_CODE` | 本機手機 HTTPS 入口設定，只由 START 在程序內注入；雲端出現即拒絕啟動 | 不手動設定 |
 
 `API_BASE_URL` 只在伺服器端使用。新增設定需先分類並核定；公開設定同步 `app/core/config.py`、`app/core/environment.py` 的允許集合／驗證、空值範本及文件，不能任意新增 JSON 欄位。公司機密只由管理者存於雲端；只新增或輪替雲端機密不改本機啟動器。

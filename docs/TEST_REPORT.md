@@ -902,3 +902,37 @@ STARTUP 42 筆清單只在讀取時處理 CRLF 並核對路徑與雜湊，原檔
 - check_project 單站與 --project-root 跨站皆 PASS（0 issues）。
 - 完整 pytest 343 passed／54 skipped（skip 為既有前置條件，不算通過）；Ruff check／format 37 檔、djLint 14 模板 0 錯誤。手機 HTTPS /login 與一般入口相同、無 WWW-Authenticate、無開發導覽；未登入 /invoices 導回 /login；診斷 403（同程序 16 項與真 Tunnel 實測）。
 - 未修改本站任何程式、樣板、測試或契約；只追加本節。證據 C:\Project\tmp\ig-claude-final-20261023。
+
+## 2026-10-29 Claude：手機上傳串接 API
+
+- 範圍：clients/invoices.py 新增 recognize_invoice、check_duplicate、submit_invoice；routers/invoices.py 以 POST /invoices/mobile-recognize、/check-duplicate、/mobile-upload 轉呼叫 API（取代記憶體示範資料）；mobile-camera.js 改為縮圖上傳、依 API 欄位產生表單、顯示 AI 回傳 JSON 與檢核提醒、查重與送出；移除示範辨識值、實際用途／備註欄（資料表沒有欄位）與離線假成功；欄位一律以 value／textContent 寫入。
+- 測試：tests/unit/test_pages.py 手機上傳案例改寫（未登入、轉呼叫內容、過大影像、API 錯誤轉 JSON、401 導向登入、查重、送出、未知欄位、跨站 Origin、client 路徑）。
+- 驗證：check_project PASS；pytest 386 passed、54 skipped；ruff check／format --check、djLint、environment --check 通過；`node --check` 通過。另以本機靜態頁＋假 API 回應在瀏覽器實跑 JS：示範發票 → 辨識 → 欄位與提醒 → 新增明細 → 核對 → 查重 → 送出 → 成功頁與本機紀錄皆正確，辨識值含 HTML 時以文字顯示。
+- 未驗證：經 START 連正式 API 的手機實測。
+
+## 2026-10-29 Claude：使用者修改欄位標記與 JSON 錯誤
+
+- 測試：test_pages.py 新增 Session 預檢錯誤回 JSON、401 仍導向登入、跨站 Origin JSON、格式錯誤不回輸入值；送出內容含 source_line_no 與 changes。
+- 驗證：check_project PASS；pytest 390 passed、54 skipped；ruff check／format --check、djLint、environment --check、`node --check` 通過。
+- 瀏覽器實跑（本機靜態頁＋假 API，不連任何服務）：辨識後無欄位被標記；修改賣方名稱、稅額（含中間值）、明細數量後即時標示「已修改」與 AI 原值；新增明細標示「新增」；確認頁列出 6 個修改；送出的 changes 依序 8 筆、明細帶 source_line_no；三個請求皆帶 Accept: application/json。另以同一份比對規則 17 案對照 API，結果一致（全形數字一項先不一致，已修 API）。
+- 未驗證：經 START 連正式 API 的手機實測。
+
+## 2026-10-29 Claude：Codex 第二輪檢驗修正（前台）
+
+- 新增測試：非 JSON 格式錯誤顯示錯誤頁且不含輸入值；不存在路由依 Accept 回 JSON 或 HTML。
+- 驗證：check_project PASS；pytest 392 passed、54 skipped；ruff check／format --check、djLint、environment --check、`node --check` 通過；以 node 執行 canonicalValue 與 API 對照 17,325 組差異 0。
+- 未驗證：經 START 連正式 API 的手機實測。
+
+## 2026-10-29 Claude：電腦上傳頁（本機影像與單頁 PDF）
+
+- 範圍：/invoices/upload 改為選取本機檔案後走與手機頁相同的流程（預覽 → AI 辨識 → 核對與修改標記 → 查重 → 送出）；手機頁步驟 2～5 抽成共用片段 `pages/invoices/_upload_review_steps.html`，router 傳 upload_mode（camera／file）；mobile-camera.js 加入檔案模式（「重新選擇檔案」回選檔步驟、PDF 以 object URL 於 iframe 預覽並可另開分頁、PDF 不旋轉、原檔上傳）。原本停用的「上傳（建置中）」表單移除。
+- 測試：上傳頁以檔案模式渲染並含共用步驟與 PDF 預覽、未登入導向登入、手機頁仍為相機模式、PDF 經辨識端點轉給 API。
+- 瀏覽器實跑（以前台實際渲染的 /invoices/upload，替身登入、假 API，不連任何服務）：選本機 JPG → 預覽可旋轉 → 辨識送出 JPG → 核對頁；「重新選擇檔案」回選檔；選單頁 PDF → iframe 預覽、可另開、旋轉隱藏 → 原檔（application/pdf）送辨識 → 核對頁顯示 PDF → 查重 → 送出 → 成功頁顯示「PDF（不旋轉）」、按鈕「繼續上傳下一張」；4 MB 以上 PDF 與 GIF 提示不接受。實跑時發現切換到 PDF 時舊影像仍顯示（全站 img 的 display 蓋過 hidden），已在 mobile-camera.css 修正並重測。
+- 驗證：check_project（--project-root）PASS；pytest 395 passed、54 skipped；ruff check／format --check、djLint（25 檔）、environment --check、`node --check` 通過。
+- 未驗證：經 START 連正式 API 的實際上傳。
+
+## 2026-10-29 Claude：Codex 檢驗電腦上傳頁後修正
+
+- 瀏覽器實跑（以前台實際渲染的 /invoices/upload，替身登入、可手動放行的假辨識回應，不連任何服務）：選 A.pdf 送辨識（按鈕顯示辨識中）→ 按「重新選擇檔案」（按鈕立即恢復）→ 選 B.pdf → A 的回應晚到：停在預覽步驟、未產生欄位、無錯誤提示 → B 送辨識 → 核對頁賣方名稱為 B 的結果。辨識遇到 Session 失效轉址時前往 /login?next=目前頁面。
+- 驗證：三站 check_project（--project-root）PASS；pytest API 716 passed／14 skipped、前台 395 passed／54 skipped、ADMIN 1193 passed／9 skipped；ruff check／format --check、environment --check 通過；前台 djLint 25 檔 0 錯誤、`node --check` 通過；API／ADMIN supabase_storage.py 逐位元組相同。
+- 未驗證：經 START 連正式 API 的實際上傳；headless 瀏覽器中 PDF 內容的實際渲染（Codex 回報 headless Chrome 檢視器內容空白，屬自動化環境待確認）。

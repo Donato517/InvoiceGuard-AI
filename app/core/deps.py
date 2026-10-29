@@ -16,7 +16,10 @@ from app.core.security import get_session_token
 
 
 def require_login(request: Request) -> str:
-    """需要登入的頁面使用：回傳 access token；未登入時拋出 LoginRequiredError（導向登入頁）。"""
+    """需要登入的頁面使用：回傳 cookie 中的 Session Token；沒有 cookie 時拋出 LoginRequiredError。
+
+    只確認 cookie 存在；Session 是否有效由 routers/auth.py 的 require_session 經 API 核對。
+    """
     token = get_session_token(request)
     if token is None:
         raise LoginRequiredError

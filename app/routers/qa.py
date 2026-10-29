@@ -9,13 +9,15 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.deps import AccessToken
 from app.core.templating import templates
+from app.routers.auth import require_session
 
-router = APIRouter(prefix="/qa", tags=["qa"])
+# 全部問答頁面需登入：每次經 API 核對 Session
+router = APIRouter(prefix="/qa", tags=["qa"], dependencies=[Depends(require_session)])
 
 # 初始示範對話紀錄
 _CHAT_HISTORY: list[dict[str, str | list[str]]] = [

@@ -1,46 +1,97 @@
 /**
  * 模組名稱：mobile-camera.js
- * 功能說明：手機端採購拍照上傳、外框對齊檢測與 90° 影像旋轉預覽。
+ * 功能說明：發票上傳——手機拍照（外框對齊檢測）或電腦選取本機檔案、90° 旋轉預覽、AI 辨識、
+ *   欄位核對（標記使用者修改的欄位）、查重與送出。手機拍照頁與電腦上傳頁共用，以 data-upload-mode 區分：
+ *   camera（手機拍照頁，JPG／PNG）、file（電腦上傳頁，JPG／PNG 與單頁 PDF）。
+ * 注意事項：
+ *   - 辨識、查重、送出經本站 /invoices/mobile-recognize、/invoices/check-duplicate、/invoices/mobile-upload
+ *     轉呼叫 API（fetch 帶 Accept: application/json，錯誤回 JSON）；送出時沿用 API 辨識時保存的影像
+ *     （辨識後 1 小時內有效）。
+ *   - 影像辨識前先縮成最長邊 2000px 的 JPEG（Vercel 請求上限 4.5 MB）；PDF 不轉換、不旋轉，原檔上傳（4 MB 以內）。
+ *   - 與 AI 辨識值不同的欄位即時標記「已修改」；每次修改（欄位離開或選擇時）記入修改紀錄，送出時一併給 API，
+ *     API 寫入 invoice_field_reviews（供審核標示）與 invoice_changes（逐次修改）。
+ *     比對規則 canonicalValue 須與 API invoice_upload_service._canonical_value 相同。
+ *   - 欄位值一律以 value／textContent 寫入，不拼接 HTML，避免辨識內容被當成標記執行。
  */
 
 (function () {
   'use strict';
 
-  // 14 個標準發票欄位定義
-  const INVOICE_FIELDS = [
-    ['form', '發票聯式／識別'],
-    ['no', '字軌號碼'],
-    ['date', '發票日期'],
-    ['buyer', '買受人名稱'],
-    ['buyerId', '買受人統編'],
-    ['item', '品名／用途'],
-    ['qty', '數量'],
-    ['price', '單價'],
-    ['amount', '明細金額'],
-    ['sales', '銷售額合計'],
-    ['tax', '課稅別與稅額'],
-    ['total', '總計／國字大寫'],
-    ['remark', '備註'],
-    ['seller', '銷貨人'],
-  ];
-
-  // 模擬示範發票欄位資料
-  const DEFAULT_SAMPLE_DATA = {
-    form: '統一發票（三聯式）',
-    no: 'CD12345678',
-    date: '115/08/15',
-    buyer: '範例科技股份有限公司',
-    buyerId: '12345678',
-    item: '辦公用品',
-    qty: '2',
-    price: '3000',
-    amount: '6000',
-    sales: '6000',
-    tax: '應稅 / 300',
-    total: '6300 / 陸仟參佰元整',
-    remark: '營業用文具',
-    seller: '27601907 / 範例文具行',
+  // 欄位名稱同 API／public.invoices、invoice_items
+  const FIELD_LABELS = {
+    invoice_track: '字軌',
+    invoice_number: '號碼',
+    invoice_date: '發票日期',
+    buyer_name: '買受人名稱',
+    buyer_tax_id: '買受人統一編號',
+    seller_name: '賣方（銷貨人）名稱',
+    seller_tax_id: '賣方統一編號',
+    tax_type: '課稅別',
+    sales_amount: '銷售額合計',
+    tax_amount: '營業稅額',
+    total_amount: '總計',
+    total_amount_zh: '總計新臺幣（國字大寫）',
+    item_name: '品名',
+    quantity: '數量',
+    unit_price: '單價',
+    line_amount: '金額',
   };
+  const HEADER_FIELDS = [
+    'invoice_track',
+    'invoice_number',
+    'invoice_date',
+    'buyer_name',
+    'buyer_tax_id',
+    'sales_amount',
+    'tax_type',
+    'tax_amount',
+    'total_amount',
+    'total_amount_zh',
+    'seller_name',
+    'seller_tax_id',
+  ];
+  const ITEM_FIELDS = ['item_name', 'quantity', 'unit_price', 'line_amount'];
+  const AMOUNT_FIELDS = ['sales_amount', 'tax_amount', 'total_amount'];
+  const INPUT_ATTRS = {
+    invoice_track: { maxlength: '2', autocapitalize: 'characters', placeholder: 'AB' },
+    invoice_number: { maxlength: '8', inputmode: 'numeric', placeholder: '12345678' },
+    invoice_date: { type: 'date' },
+    buyer_tax_id: { inputmode: 'numeric', maxlength: '8' },
+    seller_tax_id: { inputmode: 'numeric', maxlength: '8' },
+    sales_amount: { inputmode: 'decimal' },
+    tax_amount: { inputmode: 'decimal' },
+    total_amount: { inputmode: 'decimal' },
+    quantity: { inputmode: 'decimal' },
+    unit_price: { inputmode: 'decimal' },
+    line_amount: { inputmode: 'decimal' },
+  };
+  // 比對規則（同 API）：數字去逗號、空白與尾端 0；字軌、號碼、統編去空白與連字號並轉大寫
+  const NUMBER_FIELDS = new Set(['sales_amount', 'tax_amount', 'total_amount', 'quantity', 'unit_price', 'line_amount']);
+  const CODE_FIELDS = new Set(['invoice_track', 'invoice_number', 'seller_tax_id', 'buyer_tax_id']);
+  // 空白字元集合：與 API app/utils/invoice_format.py 的 WHITESPACE 相同（明列，不依賴各語言的 \s 定義）
+  const SPACE_CHARS = '\\t\\n\\v\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff';
+  const EDGE_SPACES = new RegExp('^[' + SPACE_CHARS + ']+|[' + SPACE_CHARS + ']+$', 'g');
+  const NUMBER_NOISE = new RegExp('[' + SPACE_CHARS + ',，]', 'g');
+  const CODE_NOISE = new RegExp('[' + SPACE_CHARS + '-]', 'g');
+  const TAX_TYPES = [
+    ['', '請選擇課稅別'],
+    ['taxable', '應稅'],
+    ['zero_rated', '零稅率'],
+    ['tax_exempt', '免稅'],
+  ];
+  const STATUS_LABELS = { pending_department_approval: '待單位核准' };
+  // API 提醒的欄位 → 畫面上的輸入欄位
+  const WARNING_TARGETS = { tax_period: 'invoice_date' };
+  const AMOUNT_RE = /^\d{1,16}(\.\d{1,2})?$/;
+  const QUANTITY_RE = /^\d{1,14}(\.\d{1,4})?$/;
+  const MAX_TEXT = 200;
+  const MAX_CHANGES = 500;
+  const MAX_UPLOAD_SIDE = 2000;
+  const MAX_UPLOAD_BYTES = 3.8 * 1024 * 1024;
+  const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024; // 選取的原始影像（辨識前會縮圖）
+  const MAX_PDF_BYTES = 4 * 1024 * 1024; // PDF 原檔上傳，與 API 上限相同
+  const MAX_ITEMS = 50;
+  const HISTORY_KEY = 'ig-mobile-uploads';
 
   const ZONES = [
     ['發票字軌／號碼', 45, 8, 215, 43],
@@ -63,10 +114,19 @@
   const REFERENCE_RATIO = 969 / 595;
 
   // 狀態管理
-  let currentImage = null; // { image: dataUrl, originalImage: dataUrl, rotation: 0, name: string }
+  // 影像：{ image: dataUrl, originalImage: dataUrl, rotation, name }；PDF：{ isPdf: true, file, url（object URL）, rotation: 0, name }
+  let currentImage = null;
+  let currentRecognition = null; // API 辨識回應（顯示於 AI 回傳 JSON）
+  // 核對中的欄位值；items 每列有 row_id 與 source_line_no（對應 AI 明細序號，新增的明細為 null）
   let currentDraft = null;
-  let currentUse = '營業用文具';
+  let currentPayload = null; // 核對完成、準備查重與送出的內容
+  let aiItems = {}; // AI 辨識明細：line_no → 明細
+  let committed = new Map(); // 各欄位最後一次記入修改紀錄的值
+  let editLog = []; // 修改紀錄（依時間順序）：{ scope, rowId, field, old, new }
+  let nextRowId = 1;
   let rotationBusy = false;
+  let recognizing = false;
+  let imageVersion = 0; // 每次換檔 +1；進行中的辨識若版本不同即丟棄結果
   let isDuplicateChecked = false;
   let isDuplicate = false;
 
@@ -524,7 +584,8 @@
   // 影像旋轉核心 (Canvas 2D Rotation)
   // =========================================================================
   function rotatePhoto(delta) {
-    if (rotationBusy || !currentImage) return;
+    // PDF 以原檔辨識，不旋轉
+    if (rotationBusy || !currentImage || currentImage.isPdf) return;
 
     const original = currentImage.originalImage || currentImage.image;
     const angle =
@@ -542,8 +603,11 @@
     rotationBusy = true;
     updateRotateButtonsState();
 
+    // 旋轉期間若換了檔案，結果不寫回新檔案
+    const target = currentImage;
     const im = new Image();
     im.onload = function () {
+      if (target !== currentImage) return;
       try {
         const c = document.createElement('canvas');
         const swap = angle === 90 || angle === 270;
@@ -565,6 +629,7 @@
       }
     };
     im.onerror = function () {
+      if (target !== currentImage) return;
       rotationBusy = false;
       updatePreviewUI();
       notify('無法讀取圖片');
@@ -586,20 +651,45 @@
   }
 
   function updatePreviewUI() {
+    if (!currentImage) return;
     updateRotateButtonsState();
-    const imgEl = $('#preview-img');
-    if (imgEl && currentImage) {
-      imgEl.src = currentImage.image;
+    const isPdf = Boolean(currentImage.isPdf);
+    // 影像以 <img> 預覽；PDF 以 iframe 顯示原檔（電腦上傳頁），並提供另開分頁的連結
+    ['#preview-img', '#check-preview-img'].forEach((selector) => {
+      const img = $(selector);
+      if (!img) return;
+      img.hidden = isPdf;
+      if (!isPdf) img.src = currentImage.image;
+    });
+    ['#preview-pdf', '#check-preview-pdf'].forEach((selector) => {
+      const frame = $(selector);
+      if (!frame) return;
+      frame.hidden = !isPdf;
+      if (isPdf && frame.src !== currentImage.url) frame.src = currentImage.url;
+      if (!isPdf) frame.removeAttribute('src');
+    });
+    const link = $('#preview-pdf-link');
+    if (link) {
+      link.hidden = !isPdf;
+      if (isPdf) link.href = currentImage.url;
     }
-    const checkImgEl = $('#check-preview-img');
-    if (checkImgEl && currentImage) {
-      checkImgEl.src = currentImage.image;
-    }
+    const rotateControls = $('#rotate-controls');
+    if (rotateControls) rotateControls.hidden = isPdf;
   }
 
   function setImage(imgObj) {
+    releaseImage();
     currentImage = imgObj;
     updatePreviewUI();
+  }
+
+  // 放開目前的影像／PDF（PDF 預覽用的 object URL 需釋放）；版本號 +1，讓進行中的辨識與旋轉結果作廢
+  function releaseImage() {
+    if (currentImage && currentImage.url) URL.revokeObjectURL(currentImage.url);
+    currentImage = null;
+    imageVersion += 1;
+    rotationBusy = false;
+    resetRecognizeButton();
   }
 
   // =========================================================================
@@ -616,86 +706,799 @@
     }
   }
 
+
+  // =========================================================================
+  // 共用：DOM 建立、API 呼叫與本機上傳紀錄
+  // =========================================================================
+  function make(tag, attrs, text) {
+    const node = document.createElement(tag);
+    Object.entries(attrs || {}).forEach(([name, value]) => node.setAttribute(name, value));
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function setText(selector, text) {
+    const node = $(selector);
+    if (node) node.textContent = text;
+  }
+
+  // Session 失效時本站回 303 導向登入頁；fetch 會跟著轉址（next 是 POST 端點），
+  // 改由頁面整頁前往登入，登入後回到目前這一頁（手機拍照頁或電腦上傳頁）
+  function isLoginRedirect(res) {
+    if (res.redirected && new URL(res.url).pathname === '/login') {
+      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      return true;
+    }
+    return false;
+  }
+
+  async function readJson(res) {
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function errorOf(data) {
+    const error = data && data.error;
+    return error && typeof error === 'object' ? error : {};
+  }
+
+  function errorMessage(data, fallback) {
+    const message = errorOf(data).message;
+    return typeof message === 'string' && message ? message : fallback;
+  }
+
+  // isCurrent：回應抵達時這個請求是否仍有效（例如辨識期間已換檔）；無效時直接回 null，
+  // 不做登入轉址等任何副作用
+  async function sendRequest(url, options, isCurrent) {
+    const headers = Object.assign({ Accept: 'application/json' }, options.headers);
+    const res = await fetch(url, Object.assign({ method: 'POST' }, options, { headers }));
+    if (isCurrent && !isCurrent()) return null;
+    if (isLoginRedirect(res)) return null;
+    return { ok: res.ok, data: await readJson(res) };
+  }
+
+  function postJson(url, payload) {
+    return sendRequest(url, {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  function readHistory() {
+    try {
+      const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveHistory(entry) {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify([entry].concat(readHistory()).slice(0, 30)));
+    } catch {
+      // 無法寫入本機紀錄（例如私密瀏覽）不影響上傳結果
+    }
+  }
+
+  // =========================================================================
+  // 比對規則與修改紀錄（與 API _canonical_value 相同）
+  // =========================================================================
+  // 數字只以字串處理（去前導 0 與小數尾端 0），不轉成浮點數，任何位數都精確
+  function canonicalValue(field, value) {
+    if (value === null || value === undefined) return null;
+    const text = String(value).replace(EDGE_SPACES, '');
+    if (!text) return null;
+    if (NUMBER_FIELDS.has(field)) {
+      const cleaned = text.replace(NUMBER_NOISE, '');
+      if (!/^[0-9]+(\.[0-9]+)?$/.test(cleaned)) return cleaned;
+      const [intPart, fracPart = ''] = cleaned.split('.');
+      const integer = intPart.replace(/^0+(?=[0-9])/, '');
+      const fraction = fracPart.replace(/0+$/, '');
+      return fraction ? integer + '.' + fraction : integer;
+    }
+    if (CODE_FIELDS.has(field)) return text.replace(CODE_NOISE, '').toUpperCase();
+    return text;
+  }
+
+  function displayValue(field, value) {
+    if (value === null || value === undefined || value === '') return '（空白）';
+    if (field === 'tax_type') {
+      const match = TAX_TYPES.find(([code]) => code === value);
+      return match ? match[1] : value;
+    }
+    return String(value);
+  }
+
+  function aiHeaderValue(field) {
+    return canonicalValue(field, (currentRecognition.invoice || {})[field]);
+  }
+
+  function aiItemValue(sourceLineNo, field) {
+    const item = sourceLineNo ? aiItems[sourceLineNo] : null;
+    return item ? canonicalValue(field, item[field]) : null;
+  }
+
+  function editKey(scope, rowId, field) {
+    return scope === 'header' ? 'h:' + field : 'r:' + rowId + ':' + field;
+  }
+
+  function findRow(rowId) {
+    return currentDraft.items.find((row) => row.row_id === rowId);
+  }
+
+  function baselineFor(scope, rowId, field) {
+    if (scope === 'header') return aiHeaderValue(field);
+    const row = findRow(rowId);
+    return row ? aiItemValue(row.source_line_no, field) : null;
+  }
+
+  // 欄位值確定（離開欄位或選擇）時呼叫：與上次記錄的值不同才記一筆
+  function recordEdit(scope, rowId, field, value) {
+    const key = editKey(scope, rowId, field);
+    const next = canonicalValue(field, value);
+    const prev = committed.has(key) ? committed.get(key) : baselineFor(scope, rowId, field);
+    if (prev === next) return;
+    editLog.push({ scope, rowId, field, old: prev, new: next });
+    committed.set(key, next);
+  }
+
+  // =========================================================================
+  // 辨識：縮圖後上傳，取得 API 的辨識 JSON
+  // =========================================================================
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error('image'));
+      im.src = src;
+    });
+  }
+
+  function canvasBlob(canvas, quality) {
+    return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+  }
+
+  async function prepareUploadBlob(src) {
+    const im = await loadImage(src);
+    const scale = Math.min(1, MAX_UPLOAD_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(im.naturalWidth * scale);
+    c.height = Math.round(im.naturalHeight * scale);
+    const ctx = c.getContext('2d');
+    // PNG 透明背景轉為白底
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(im, 0, 0, c.width, c.height);
+    for (const quality of [0.85, 0.7, 0.55]) {
+      const blob = await canvasBlob(c, quality);
+      if (blob && blob.size <= MAX_UPLOAD_BYTES) return blob;
+    }
+    throw new Error('too-large');
+  }
+
+  function uploadName(name) {
+    return String(name || 'mobile_capture').replace(/\.[^.]*$/, '') + '.jpg';
+  }
+
+  function newRow(sourceLineNo, values) {
+    const row = { row_id: nextRowId++, source_line_no: sourceLineNo };
+    ITEM_FIELDS.forEach((field) => {
+      row[field] = (values && values[field]) || '';
+    });
+    return row;
+  }
+
+  function startReview(result) {
+    currentRecognition = result;
+    const invoice = result.invoice || {};
+    aiItems = {};
+    (invoice.items || []).forEach((item) => {
+      aiItems[item.line_no] = item;
+    });
+    committed = new Map();
+    editLog = [];
+    currentPayload = null;
+    currentDraft = { items: Object.values(aiItems).map((item) => newRow(item.line_no, item)) };
+    HEADER_FIELDS.forEach((field) => {
+      currentDraft[field] = invoice[field] || '';
+    });
+    if (!currentDraft.items.length) currentDraft.items.push(newRow(null));
+  }
+
+  async function recognizeCurrentImage(button) {
+    if (!currentImage || recognizing) return;
+    // 辨識期間若換了檔案（重新選擇、重拍），舊的縮圖與回應一律丟棄，不套用到新檔案
+    const version = imageVersion;
+    const image = currentImage;
+    const stale = () => version !== imageVersion;
+    recognizing = true;
+    button.disabled = true;
+    button.textContent = 'AI 辨識中…（約 10～20 秒）';
+    try {
+      const form = new FormData();
+      if (image.isPdf) {
+        // PDF 原檔上傳（選檔時已確認 4 MB 以內）
+        form.append('file', image.file, image.name);
+      } else {
+        const blob = await prepareUploadBlob(image.image);
+        if (stale()) return;
+        form.append('file', blob, uploadName(image.name));
+      }
+      const result = await sendRequest('/invoices/mobile-recognize', { body: form }, () => !stale());
+      if (stale() || !result) return;
+      if (!result.ok) {
+        notify(errorMessage(result.data, '辨識失敗，請稍後再試'));
+        return;
+      }
+      startReview(result.data);
+      populateFields();
+      showStep('step-fields');
+    } catch (err) {
+      if (stale()) return;
+      notify(
+        err && err.message === 'too-large'
+          ? '影像過大，請重新拍攝'
+          : err && err.message === 'image'
+            ? '無法讀取影像，請重新拍攝或選取'
+            : '無法連線，請確認網路後再試'
+      );
+    } finally {
+      // 已換檔時，按鈕狀態已由 releaseImage 重設，這裡不再更動
+      if (!stale()) resetRecognizeButton();
+    }
+  }
+
+  function resetRecognizeButton() {
+    recognizing = false;
+    const button = $('#btn-recognize');
+    if (button) {
+      button.disabled = false;
+      button.textContent = '辨識內容';
+    }
+  }
+
+  // =========================================================================
+  // 核對修正：依辨識結果產生欄位；與 AI 值不同的欄位即時標記「已修改」
+  // =========================================================================
+  function warningsFor(key) {
+    const warnings = (currentRecognition && currentRecognition.warnings) || [];
+    return warnings.filter((w) => (WARNING_TARGETS[w.field] || w.field) === key);
+  }
+
+  function markHeaderField(field) {
+    const input = $('#f-' + field);
+    if (!input) return;
+    const group = input.closest('.field-group');
+    const ai = aiHeaderValue(field);
+    const modified = canonicalValue(field, input.value) !== ai;
+    group.classList.toggle('is-modified', modified);
+    const note = group.querySelector('.field-modified');
+    note.hidden = !modified;
+    note.textContent = modified ? '已修改｜AI 辨識：' + displayValue(field, ai) : '';
+  }
+
+  function headerControl(field) {
+    let control;
+    if (field === 'tax_type') {
+      control = make('select', { name: field });
+      TAX_TYPES.forEach(([value, label]) => control.append(make('option', { value }, label)));
+    } else {
+      const attrs = Object.assign({ type: 'text', name: field, autocomplete: 'off', maxlength: String(MAX_TEXT) }, INPUT_ATTRS[field]);
+      control = make('input', attrs);
+    }
+    control.value = currentDraft[field] || '';
+    control.id = 'f-' + field;
+    control.dataset.field = field;
+    control.addEventListener('input', () => markHeaderField(field));
+    control.addEventListener('change', () => {
+      recordEdit('header', null, field, control.value);
+      markHeaderField(field);
+    });
+    return control;
+  }
+
+  function headerField(field) {
+    const group = make('div', { class: 'field-group' });
+    const control = headerControl(field);
+    group.append(make('label', { for: control.id }, FIELD_LABELS[field]), control);
+    group.append(make('small', { class: 'field-modified', hidden: '' }));
+    warningsFor(field).forEach((w) => group.append(make('small', { class: 'field-warning' }, w.message)));
+    return group;
+  }
+
+  function markItemRow(rowEl, row) {
+    let modified = false;
+    rowEl.querySelectorAll('[data-item-field]').forEach((input) => {
+      const field = input.dataset.itemField;
+      const ai = aiItemValue(row.source_line_no, field);
+      const changed = canonicalValue(field, input.value) !== ai;
+      input.classList.toggle('is-modified', Boolean(row.source_line_no) && changed);
+      input.title = row.source_line_no && changed ? 'AI 辨識：' + displayValue(field, ai) : '';
+      modified = modified || changed;
+    });
+    const isNew = !row.source_line_no;
+    rowEl.classList.toggle('is-new', isNew);
+    rowEl.classList.toggle('is-modified', !isNew && modified);
+    const status = rowEl.querySelector('.item-row__status');
+    status.textContent = isNew ? '新增（AI 未辨識）' : modified ? '已修改' : '';
+    const note = rowEl.querySelector('.field-modified');
+    const changes = isNew
+      ? []
+      : ITEM_FIELDS.filter((field) => {
+          const input = rowEl.querySelector('[data-item-field="' + field + '"]');
+          return canonicalValue(field, input.value) !== aiItemValue(row.source_line_no, field);
+        });
+    note.hidden = !changes.length;
+    note.textContent = changes.length
+      ? 'AI 辨識：' +
+        changes.map((field) => FIELD_LABELS[field] + ' ' + displayValue(field, aiItemValue(row.source_line_no, field))).join('、')
+      : '';
+  }
+
+  function renderDeletedItems() {
+    const box = $('#deleted-items');
+    if (!box) return;
+    const kept = new Set(currentDraft.items.map((row) => row.source_line_no).filter(Boolean));
+    const deleted = Object.values(aiItems).filter((item) => !kept.has(item.line_no));
+    box.textContent = '';
+    box.hidden = !deleted.length;
+    deleted.forEach((item) => {
+      box.append(
+        make('small', { class: 'field-modified' }, '已刪除 AI 明細 ' + item.line_no + '：' + displayValue('item_name', item.item_name) + ' ' + displayValue('line_amount', item.line_amount))
+      );
+    });
+  }
+
+  function renderItems() {
+    const box = $('#items-container');
+    if (!box) return;
+    box.textContent = '';
+    currentDraft.items.forEach((row, index) => {
+      const rowEl = make('div', { class: 'item-row', 'data-row-id': String(row.row_id) });
+      const title = make('div', { class: 'item-row__title' }, '明細 ' + (index + 1) + ' ');
+      title.append(make('span', { class: 'item-row__status' }));
+      rowEl.append(title);
+      ITEM_FIELDS.forEach((field) => {
+        // 數量、單價、金額三欄上方加欄名，已有數值時仍看得出欄位
+        if (field === 'quantity') {
+          ITEM_FIELDS.slice(1).forEach((caption) => {
+            rowEl.append(make('span', { class: 'item-row__caption' }, FIELD_LABELS[caption]));
+          });
+        }
+        const input = make(
+          'input',
+          Object.assign(
+            {
+              type: 'text',
+              autocomplete: 'off',
+              maxlength: String(MAX_TEXT),
+              placeholder: FIELD_LABELS[field],
+              'aria-label': '明細 ' + (index + 1) + ' ' + FIELD_LABELS[field],
+              class: 'item-row__' + field,
+            },
+            INPUT_ATTRS[field]
+          )
+        );
+        input.dataset.itemField = field;
+        input.value = row[field] || '';
+        input.addEventListener('input', () => markItemRow(rowEl, row));
+        input.addEventListener('change', () => {
+          row[field] = input.value.trim();
+          recordEdit('item', row.row_id, field, input.value);
+          markItemRow(rowEl, row);
+        });
+        rowEl.append(input);
+      });
+      rowEl.append(make('small', { class: 'field-modified item-row__note', hidden: '' }));
+      const remove = make('button', { type: 'button', class: 'btn btn--secondary item-row__remove' }, '刪除');
+      remove.onclick = function () {
+        collectDraft();
+        currentDraft.items = currentDraft.items.filter((item) => item.row_id !== row.row_id);
+        if (!currentDraft.items.length) currentDraft.items.push(newRow(null));
+        renderItems();
+      };
+      rowEl.append(remove);
+      box.append(rowEl);
+      markItemRow(rowEl, row);
+    });
+    renderDeletedItems();
+  }
+
+  function itemsSection() {
+    const section = make('div', { class: 'field-group items-section' });
+    section.append(make('span', { class: 'items-section__label' }, '品名明細'));
+    warningsFor('items').forEach((w) => section.append(make('small', { class: 'field-warning' }, w.message)));
+    section.append(make('div', { id: 'items-container' }), make('div', { id: 'deleted-items', hidden: '' }));
+    const add = make('button', { type: 'button', class: 'btn btn--secondary' }, '新增明細');
+    add.onclick = function () {
+      collectDraft();
+      if (currentDraft.items.length >= MAX_ITEMS) return notify('明細最多 ' + MAX_ITEMS + ' 筆');
+      currentDraft.items.push(newRow(null));
+      renderItems();
+    };
+    section.append(add);
+    return section;
+  }
+
+  function renderRecognitionSummary() {
+    const warnings = currentRecognition.warnings || [];
+    setText(
+      '#recognition-summary',
+      (warnings.length ? 'AI 辨識完成，有 ' + warnings.length + ' 項需要核對：' : 'AI 辨識完成，請對照影像逐欄核對。') +
+        '修改過的欄位會標示「已修改」，送出後一併標記給審核人員。'
+    );
+    const list = $('#recognition-warnings');
+    if (list) {
+      list.textContent = '';
+      warnings.forEach((w) => list.append(make('li', {}, w.message)));
+      list.hidden = !warnings.length;
+    }
+    setText('#ai-json', JSON.stringify(currentRecognition, null, 2));
+  }
+
   function populateFields() {
     const container = $('#fields-container');
-    if (!container) return;
-    container.innerHTML = '';
-
-    INVOICE_FIELDS.forEach(([key, label], i) => {
-      const group = document.createElement('div');
-      group.className = 'field-group';
-      const val = currentDraft ? currentDraft[key] || '' : '';
-      group.innerHTML =
-        '<label for="f-' +
-        key +
-        '">' +
-        (i + 1) +
-        '. ' +
-        label +
-        '</label>' +
-        '<input id="f-' +
-        key +
-        '" name="' +
-        key +
-        '" data-field="' +
-        key +
-        '" value="' +
-        val +
-        '">';
-      container.appendChild(group);
+    if (!container || !currentDraft) return;
+    container.textContent = '';
+    const kind =
+      currentRecognition.is_triplicate === true
+        ? '三聯式統一發票'
+        : currentRecognition.is_triplicate === false
+          ? '非三聯式統一發票（請確認影像）'
+          : '無法判斷（請確認影像）';
+    container.append(make('p', { class: 'field-note' }, '發票聯式：' + kind));
+    const pair = make('div', { class: 'field-pair' });
+    pair.append(headerField('invoice_track'), headerField('invoice_number'));
+    container.append(pair);
+    HEADER_FIELDS.slice(2).forEach((field) => {
+      if (field === 'sales_amount') container.append(itemsSection());
+      container.append(headerField(field));
     });
-
-    const useInput = $('#m-use');
-    if (useInput) useInput.value = currentUse;
+    renderItems();
+    HEADER_FIELDS.forEach(markHeaderField);
+    renderRecognitionSummary();
     const ack = $('#uploaderAck');
     if (ack) ack.checked = false;
   }
 
-  async function checkDuplicateInvoice(no) {
-    try {
-      const res = await fetch('/invoices/check-duplicate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invoice_number: no }),
+  // 讀回畫面上的值；值與上次記錄不同的欄位補記一筆（例如未離開欄位就按按鈕）
+  function collectDraft() {
+    document.querySelectorAll('#fields-container [data-field]').forEach((input) => {
+      const field = input.dataset.field;
+      currentDraft[field] = input.value.trim();
+      recordEdit('header', null, field, input.value);
+    });
+    document.querySelectorAll('#items-container [data-row-id]').forEach((rowEl) => {
+      const row = findRow(Number(rowEl.dataset.rowId));
+      if (!row) return;
+      rowEl.querySelectorAll('[data-item-field]').forEach((input) => {
+        const field = input.dataset.itemField;
+        row[field] = input.value.trim();
+        recordEdit('item', row.row_id, field, input.value);
       });
-      if (res.redirected && res.url.includes('/login')) {
-        window.location.href = res.url;
-        return false;
+    });
+  }
+
+  function cleanNumber(value) {
+    return String(value || '').replace(/[\s,，]/g, '');
+  }
+
+  // 檢查必要欄位與格式，組出 API 送出內容；回傳 { error } 或 { payload, rows }
+  function buildPayload() {
+    const d = currentDraft;
+    const track = d.invoice_track.toUpperCase().replace(/[\s-]/g, '');
+    const number = d.invoice_number.replace(/[\s-]/g, '');
+    if (!/^[A-Z]{2}$/.test(track)) return { error: '字軌需為 2 碼英文' };
+    if (!/^\d{8}$/.test(number)) return { error: '號碼需為 8 碼數字' };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.invoice_date)) return { error: '請填寫發票日期' };
+    const buyerTaxId = cleanNumber(d.buyer_tax_id);
+    if (buyerTaxId && !/^\d{8}$/.test(buyerTaxId)) return { error: '買受人統一編號需為 8 碼數字' };
+    const sellerTaxId = cleanNumber(d.seller_tax_id);
+    if (!/^\d{8}$/.test(sellerTaxId)) return { error: '賣方統一編號需為 8 碼數字' };
+    if (!d.tax_type) return { error: '請選擇課稅別' };
+    const amounts = {};
+    for (const field of AMOUNT_FIELDS) {
+      amounts[field] = cleanNumber(d[field]);
+      if (!AMOUNT_RE.test(amounts[field])) return { error: '請確認' + FIELD_LABELS[field] + '（數字，最多 2 位小數）' };
+    }
+    const items = [];
+    const rows = [];
+    for (const row of d.items) {
+      if (!ITEM_FIELDS.some((field) => row[field])) continue;
+      const line = items.length + 1;
+      const lineAmount = cleanNumber(row.line_amount);
+      const quantity = cleanNumber(row.quantity);
+      const unitPrice = cleanNumber(row.unit_price);
+      if (!row.item_name) return { error: '請填寫明細 ' + line + ' 的品名' };
+      if (!AMOUNT_RE.test(lineAmount)) return { error: '請確認明細 ' + line + ' 的金額' };
+      if ((quantity && !QUANTITY_RE.test(quantity)) || (unitPrice && !QUANTITY_RE.test(unitPrice))) {
+        return { error: '請確認明細 ' + line + ' 的數量與單價（數字，最多 4 位小數）' };
       }
-      if (res.ok) {
-        const data = await res.json();
-        return data.duplicate === true;
+      rows.push(row);
+      items.push({
+        source_line_no: row.source_line_no,
+        item_name: row.item_name,
+        quantity: quantity || null,
+        unit_price: unitPrice || null,
+        line_amount: lineAmount,
+      });
+    }
+    if (!items.length) return { error: '請至少填寫一筆品名明細' };
+    // 修改紀錄：只送出仍在送出明細中的列，明細序號改為送出時的順序
+    const lineOf = new Map(rows.map((row, i) => [row.row_id, i + 1]));
+    const changes = editLog
+      .filter((entry) => entry.scope === 'header' || lineOf.has(entry.rowId))
+      .map((entry) => ({
+        field_scope: entry.scope,
+        line_no: entry.scope === 'header' ? null : lineOf.get(entry.rowId),
+        field_name: entry.field,
+        old_value: entry.old,
+        new_value: entry.new,
+      }));
+    // 修改紀錄要完整保存（含中間修改），超過 API 上限時不壓縮、不刪減，請使用者重新辨識
+    if (changes.length > MAX_CHANGES) {
+      return {
+        error: '修改次數已超過 ' + MAX_CHANGES + ' 次，無法完整保存修改紀錄；請重新拍攝辨識後再核對',
+      };
+    }
+    return {
+      rows,
+      payload: Object.assign(
+        {
+          recognition_id: currentRecognition.recognition_id,
+          invoice_track: track,
+          invoice_number: number,
+          invoice_date: d.invoice_date,
+          seller_tax_id: sellerTaxId,
+          seller_name: d.seller_name || null,
+          buyer_tax_id: buyerTaxId || null,
+          buyer_name: d.buyer_name || null,
+          tax_type: d.tax_type,
+          total_amount_zh: d.total_amount_zh || null,
+          items,
+          changes,
+        },
+        amounts
+      ),
+    };
+  }
+
+  // 與 AI 辨識值不同的欄位（API 以相同規則寫入 invoice_field_reviews）
+  function modifiedFields(payload) {
+    const list = [];
+    HEADER_FIELDS.forEach((field) => {
+      const ai = aiHeaderValue(field);
+      const now = canonicalValue(field, payload[field]);
+      if (ai !== now) list.push({ label: FIELD_LABELS[field], field, ai, now });
+    });
+    payload.items.forEach((item, index) => {
+      ITEM_FIELDS.forEach((field) => {
+        const ai = aiItemValue(item.source_line_no, field);
+        const now = canonicalValue(field, item[field]);
+        if (ai !== now) {
+          const prefix = '明細 ' + (index + 1) + (item.source_line_no ? '' : '（新增）') + ' ';
+          list.push({ label: prefix + FIELD_LABELS[field], field, ai, now });
+        }
+      });
+    });
+    const kept = new Set(payload.items.map((item) => item.source_line_no).filter(Boolean));
+    Object.values(aiItems)
+      .filter((item) => !kept.has(item.line_no))
+      .forEach((item) => {
+        list.push({ label: '刪除 AI 明細 ' + item.line_no, field: 'item_name', ai: item.item_name, now: null });
+      });
+    return list;
+  }
+
+  function renderModifiedSummary(payload) {
+    const box = $('#modified-summary');
+    const list = $('#modified-list');
+    if (!box || !list) return;
+    const fields = modifiedFields(payload);
+    list.textContent = '';
+    fields.forEach((f) => {
+      list.append(make('li', {}, f.label + '：' + displayValue(f.field, f.ai) + ' → ' + displayValue(f.field, f.now)));
+    });
+    setText(
+      '#modified-title',
+      fields.length ? '已修改 ' + fields.length + ' 個欄位（送出後標記給審核人員）：' : '未修改 AI 辨識內容。'
+    );
+    box.classList.toggle('alert--warning', Boolean(fields.length));
+    list.hidden = !fields.length;
+  }
+
+  // =========================================================================
+  // 查重與送出
+  // =========================================================================
+  function showDuplicateResult(kind, title, message) {
+    const box = $('#dup-alert-box');
+    if (!box) return;
+    box.hidden = false;
+    box.className = 'duplicate-alert duplicate-alert--' + kind;
+    box.textContent = '';
+    box.append(make('strong', {}, title), document.createTextNode(message));
+  }
+
+  function resetDuplicateState() {
+    isDuplicateChecked = false;
+    isDuplicate = false;
+    const box = $('#dup-alert-box');
+    if (box) box.hidden = true;
+    const submitGroup = $('#final-submit-group');
+    if (submitGroup) submitGroup.hidden = true;
+    const btnCheckDup = $('#btn-check-duplicate');
+    if (btnCheckDup) btnCheckDup.hidden = false;
+    const finalAck = $('#finalAck');
+    if (finalAck) finalAck.checked = false;
+  }
+
+  function invoiceNoOf(payload) {
+    return payload.invoice_track + payload.invoice_number;
+  }
+
+  async function checkDuplicate(button) {
+    button.disabled = true;
+    button.textContent = '檢查中…';
+    const no = invoiceNoOf(currentPayload);
+    try {
+      const result = await postJson('/invoices/check-duplicate', {
+        invoice_track: currentPayload.invoice_track,
+        invoice_number: currentPayload.invoice_number,
+        seller_tax_id: currentPayload.seller_tax_id,
+      });
+      if (!result) return;
+      if (!result.ok) {
+        showDuplicateResult('warn', '無法查重：', errorMessage(result.data, '請稍後再試'));
+        return;
+      }
+      isDuplicateChecked = true;
+      isDuplicate = result.data.is_duplicate === true;
+      button.hidden = true;
+      const submitGroup = $('#final-submit-group');
+      if (isDuplicate) {
+        showDuplicateResult('warn', '⚠️ 發票重複！', '此發票（' + no + '）已存在於系統中，禁止重複上傳。');
+        if (submitGroup) submitGroup.hidden = true;
+      } else {
+        showDuplicateResult('ok', '✓ 未重複！', '發票（' + no + '）經查核無重複紀錄。');
+        if (submitGroup) submitGroup.hidden = false;
       }
     } catch {
-      // 離線模式或 API 離線時，比對本機 storage
+      showDuplicateResult('warn', '無法查重：', '無法連線，請確認網路後再試');
+    } finally {
+      button.disabled = false;
+      button.textContent = '系統檢查發票是否重複';
     }
-    const existing = JSON.parse(localStorage.getItem('ig-mobile-uploads') || '[]');
-    return existing.some((item) => item.no === no);
+  }
+
+  function showSuccess(data) {
+    const no = invoiceNoOf(currentPayload);
+    saveHistory({
+      no,
+      date: new Date().toLocaleString('zh-TW'),
+      sales: currentPayload.sales_amount,
+      rotation: currentImage.rotation || 0,
+    });
+    setText('#success-invoice-no', no);
+    setText('#success-rotation', currentImage.isPdf ? 'PDF（不旋轉）' : (currentImage.rotation || 0) + '°');
+    setText('#success-status', STATUS_LABELS[data.status] || data.status || '');
+    const modified = (data && data.modified_fields) || [];
+    setText(
+      '#success-modified',
+      modified.length ? modified.length + ' 個欄位（已標記，審核人員會逐欄確認）' : '無（與 AI 辨識相同）'
+    );
+    const warnings = (data && data.warnings) || [];
+    const box = $('#success-warnings');
+    const list = $('#success-warning-list');
+    if (box && list) {
+      list.textContent = '';
+      warnings.forEach((w) => list.append(make('li', {}, w.message)));
+      box.hidden = !warnings.length;
+    }
+    showStep('step-success');
+  }
+
+  async function submitInvoice(button) {
+    if (!isDuplicateChecked) return notify('請先點選查重');
+    if (isDuplicate) return notify('發票已存在，無法上傳');
+    const ack = $('#finalAck');
+    if (!ack || !ack.checked) return notify('請勾選「確認將資料上傳至系統」');
+
+    button.disabled = true;
+    button.textContent = '上傳中…';
+    try {
+      const result = await postJson('/invoices/mobile-upload', currentPayload);
+      if (!result) return;
+      if (result.ok) {
+        showSuccess(result.data);
+        return;
+      }
+      if (errorOf(result.data).code === 'INVOICE_DUPLICATED') {
+        isDuplicate = true;
+        const submitGroup = $('#final-submit-group');
+        if (submitGroup) submitGroup.hidden = true;
+        showDuplicateResult('warn', '⚠️ 發票重複！', errorMessage(result.data, '此發票已存在於系統中'));
+        return;
+      }
+      notify(errorMessage(result.data, '上傳失敗，請稍後再試'));
+    } catch {
+      notify('無法連線，請確認網路後再試');
+    } finally {
+      button.disabled = false;
+      button.textContent = '確認上傳至系統';
+    }
+  }
+
+  function renderHistory() {
+    const container = $('#history-list-container');
+    if (!container) return;
+    container.textContent = '';
+    const list = readHistory();
+    if (!list.length) {
+      container.append(make('p', { class: 'muted' }, '目前尚無本機上傳紀錄。'));
+      return;
+    }
+    const ul = make('ul', { class: 'list' });
+    list.forEach((item) => {
+      const li = make('li');
+      li.append(
+        make('b', {}, String(item.no || '')),
+        document.createTextNode(' · 銷售額 $' + String(item.sales || '') + ' · 旋轉 ' + String(item.rotation || 0) + '°'),
+        make('br'),
+        make('small', { class: 'muted' }, String(item.date || ''))
+      );
+      ul.append(li);
+    });
+    container.append(ul);
   }
 
   // =========================================================================
   // 事件綁定與初始化
   // =========================================================================
   document.addEventListener('DOMContentLoaded', () => {
-    // 1. 開啟相機
+    // 頁面模式：camera（手機拍照頁）或 file（電腦上傳頁，可另選單頁 PDF）
+    const shell = $('[data-upload-mode]');
+    const fileMode = Boolean(shell) && shell.dataset.uploadMode === 'file';
+
+    // 1. 開啟相機；電腦上傳頁的「重新選擇檔案」回到選檔步驟
     const btnCamera = $('#btn-open-camera');
     if (btnCamera) btnCamera.onclick = openCamera;
+    // 重拍／重新選擇：先作廢目前檔案與進行中的辨識，再回到第一步（手機頁接著開相機）
+    const chooseAgain = () => {
+      releaseImage();
+      showStep('step-upload');
+      if (!fileMode) openCamera();
+    };
     const btnRetake1 = $('#btn-retake-preview');
-    if (btnRetake1) btnRetake1.onclick = openCamera;
+    if (btnRetake1) btnRetake1.onclick = chooseAgain;
     const btnRetake2 = $('#btn-retake-fields');
-    if (btnRetake2) btnRetake2.onclick = openCamera;
+    if (btnRetake2) btnRetake2.onclick = chooseAgain;
 
-    // 2. 從相簿選取檔案
+    // 2. 選取本機檔案：影像辨識前會縮圖，原檔可到 10 MB；PDF（只限電腦上傳頁）原檔上傳，4 MB 以內
     const fileInput = $('#file-album-upload');
     if (fileInput) {
       fileInput.onchange = function (e) {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
-        if (!['image/jpeg', 'image/png'].includes(f.type) || f.size > 10 * 1024 * 1024) {
-          return notify('請選取 JPG 或 PNG 格式，10 MB 以內');
+        fileInput.value = '';
+        if (fileMode && f.type === 'application/pdf') {
+          if (f.size > MAX_PDF_BYTES) return notify('PDF 需在 4 MB 以內');
+          setImage({ isPdf: true, file: f, url: URL.createObjectURL(f), rotation: 0, name: f.name });
+          showStep('step-preview');
+          return;
         }
+        if (!['image/jpeg', 'image/png'].includes(f.type) || f.size > MAX_SOURCE_IMAGE_BYTES) {
+          return notify(fileMode ? '請選取 JPG、PNG（10 MB 以內）或 PDF（4 MB 以內）' : '請選取 JPG 或 PNG 格式，10 MB 以內');
+        }
+        // 讀檔是非同步的：選檔當下就作廢先前的檔案與讀檔，讀完時若已再選其他檔案（或拍照、示範）即丟棄
+        releaseImage();
+        const version = imageVersion;
         const rd = new FileReader();
         rd.onload = function () {
+          if (version !== imageVersion) return;
           setImage({
             image: rd.result,
             originalImage: rd.result,
@@ -708,7 +1511,7 @@
       };
     }
 
-    // 3. 使用示範發票
+    // 3. 使用示範發票（同樣送 API 辨識）
     const btnDemo = $('#btn-use-demo');
     if (btnDemo) {
       btnDemo.onclick = function () {
@@ -732,71 +1535,29 @@
     const btnRestore = $('#btn-rotate-restore');
     if (btnRestore) btnRestore.onclick = () => rotatePhoto(null);
 
-    // 5. 辨識內容
+    // 5. AI 辨識（API：存圖、OCR、20B 整理欄位）
     const btnRecognize = $('#btn-recognize');
-    if (btnRecognize) {
-      btnRecognize.onclick = function () {
-        if (!currentImage) return;
-        currentDraft = JSON.parse(JSON.stringify(DEFAULT_SAMPLE_DATA));
-        // 動態指定單號尾碼
-        currentDraft.no = 'CD' + String(Date.now()).slice(-8);
-        currentUse = '營業用文具';
-        populateFields();
-        showStep('step-fields');
-      };
-    }
+    if (btnRecognize) btnRecognize.onclick = () => recognizeCurrentImage(btnRecognize);
 
     // 6. 核對修正完成
     const btnConfirmFields = $('#btn-confirm-fields');
     if (btnConfirmFields) {
       btnConfirmFields.onclick = function () {
-        if (!currentDraft) return;
-
-        // 讀取更新的欄位值
-        document.querySelectorAll('#fields-container input').forEach((inp) => {
-          const k = inp.getAttribute('data-field');
-          if (k) currentDraft[k] = inp.value.trim();
-        });
-
-        const useInput = $('#m-use');
-        if (useInput) currentUse = useInput.value.trim();
-
-        // 檢查必要欄位
-        for (let i = 0; i < INVOICE_FIELDS.length; i++) {
-          const key = INVOICE_FIELDS[i][0];
-          const label = INVOICE_FIELDS[i][1];
-          if (key !== 'remark' && !currentDraft[key]) {
-            return notify('請確認並填寫：' + label);
-          }
-        }
-
-        const no = currentDraft.no.toUpperCase();
-        if (!/^[A-Z]{2}\d{8}$/.test(no)) {
-          return notify('發票單號格式需為 2 碼英文 + 8 碼數字');
-        }
-        currentDraft.no = no;
-
+        if (!currentDraft || !currentRecognition) return;
+        collectDraft();
+        const built = buildPayload();
+        if (built.error) return notify(built.error);
         const ack = $('#uploaderAck');
         if (!ack || !ack.checked) {
           return notify('請勾選「我已核對影像與辨識內容，確認資料正確」');
         }
-
-        // 填寫確認頁摘要
-        const sumNo = $('#sum-invoice-no');
-        if (sumNo) sumNo.textContent = currentDraft.no;
-        const sumSales = $('#sum-sales-amount');
-        if (sumSales) sumSales.textContent = currentDraft.sales;
-
-        // 重置查重狀態
-        isDuplicateChecked = false;
-        isDuplicate = false;
-        const dupBox = $('#dup-alert-box');
-        if (dupBox) dupBox.hidden = true;
-        const submitGroup = $('#final-submit-group');
-        if (submitGroup) submitGroup.hidden = true;
-        const btnCheckDup = $('#btn-check-duplicate');
-        if (btnCheckDup) btnCheckDup.hidden = false;
-
+        currentPayload = built.payload;
+        setText('#sum-invoice-no', invoiceNoOf(currentPayload));
+        setText('#sum-seller-tax-id', currentPayload.seller_tax_id);
+        setText('#sum-sales-amount', currentPayload.sales_amount);
+        setText('#sum-total-amount', currentPayload.total_amount);
+        renderModifiedSummary(currentPayload);
+        resetDuplicateState();
         showStep('step-confirm');
       };
     }
@@ -809,132 +1570,22 @@
 
     // 8. 系統查重
     const btnCheckDup = $('#btn-check-duplicate');
-    if (btnCheckDup) {
-      btnCheckDup.onclick = async function () {
-        btnCheckDup.disabled = true;
-        btnCheckDup.textContent = '檢查中…';
-
-        const dup = await checkDuplicateInvoice(currentDraft.no);
-        isDuplicateChecked = true;
-        isDuplicate = dup;
-
-        btnCheckDup.disabled = false;
-        btnCheckDup.textContent = '系統檢查單號是否重複';
-        btnCheckDup.hidden = true;
-
-        const dupBox = $('#dup-alert-box');
-        const submitGroup = $('#final-submit-group');
-
-        if (dupBox) {
-          dupBox.hidden = false;
-          if (dup) {
-            dupBox.className = 'duplicate-alert duplicate-alert--warn';
-            dupBox.innerHTML =
-              '<strong>⚠️ 單號重複！</strong>此單號 (' +
-              currentDraft.no +
-              ') 已存在於系統中，禁止重複上傳。';
-            if (submitGroup) submitGroup.hidden = true;
-          } else {
-            dupBox.className = 'duplicate-alert duplicate-alert--ok';
-            dupBox.innerHTML =
-              '<strong>✓ 單號未重複！</strong>單號 (' +
-              currentDraft.no +
-              ') 經查核有效且無重複紀錄。';
-            if (submitGroup) submitGroup.hidden = false;
-          }
-        }
-      };
-    }
+    if (btnCheckDup) btnCheckDup.onclick = () => checkDuplicate(btnCheckDup);
 
     // 9. 最終送出上傳
     const btnFinalSubmit = $('#btn-final-upload');
-    if (btnFinalSubmit) {
-      btnFinalSubmit.onclick = async function () {
-        if (!isDuplicateChecked) return notify('請先點選查重');
-        if (isDuplicate) return notify('單號已存在，無法上傳');
-
-        const ack = $('#finalAck');
-        if (!ack || !ack.checked) {
-          return notify('請勾選「確認將資料上傳至系統」');
-        }
-
-        btnFinalSubmit.disabled = true;
-        btnFinalSubmit.textContent = '上傳中…';
-
-        const payload = {
-          invoice_number: currentDraft.no,
-          invoice_date: currentDraft.date,
-          seller_tax_id: currentDraft.seller,
-          buyer_tax_id: currentDraft.buyerId,
-          net_amount: parseInt(currentDraft.sales, 10) || 0,
-          tax_amount: parseInt(currentDraft.tax, 10) || 0,
-          total_amount: parseInt(currentDraft.total, 10) || 0,
-          item_name: currentDraft.item,
-          file_name: currentImage.name,
-          rotation: currentImage.rotation || 0,
-          use: currentUse,
-        };
-
-        try {
-          const res = await fetch('/invoices/mobile-upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (res.redirected && res.url.includes('/login')) {
-            window.location.href = res.url;
-            return;
-          }
-          if (res.ok) {
-            // 存入本機上傳紀錄快取
-            const list = JSON.parse(localStorage.getItem('ig-mobile-uploads') || '[]');
-            list.unshift({
-              no: currentDraft.no,
-              date: new Date().toLocaleString('zh-TW'),
-              sales: currentDraft.sales,
-              rotation: currentImage.rotation || 0,
-            });
-            localStorage.setItem('ig-mobile-uploads', JSON.stringify(list.slice(0, 30)));
-
-            const successNo = $('#success-invoice-no');
-            if (successNo) successNo.textContent = currentDraft.no;
-            const successRot = $('#success-rotation');
-            if (successRot) {
-              successRot.textContent = (currentImage.rotation || 0) + '°';
-            }
-            showStep('step-success');
-            return;
-          }
-        } catch {
-          // fallback 本機紀錄
-        }
-
-        // 即使離線也記錄成功
-        const list = JSON.parse(localStorage.getItem('ig-mobile-uploads') || '[]');
-        list.unshift({
-          no: currentDraft.no,
-          date: new Date().toLocaleString('zh-TW'),
-          sales: currentDraft.sales,
-          rotation: currentImage.rotation || 0,
-        });
-        localStorage.setItem('ig-mobile-uploads', JSON.stringify(list.slice(0, 30)));
-
-        const successNo = $('#success-invoice-no');
-        if (successNo) successNo.textContent = currentDraft.no;
-        const successRot = $('#success-rotation');
-        if (successRot) {
-          successRot.textContent = (currentImage.rotation || 0) + '°';
-        }
-        showStep('step-success');
-      };
-    }
+    if (btnFinalSubmit) btnFinalSubmit.onclick = () => submitInvoice(btnFinalSubmit);
 
     // 10. 繼續上傳下一張
     const btnNext = $('#btn-upload-next');
     if (btnNext) {
       btnNext.onclick = function () {
-        currentImage = null;
+        releaseImage();
+        currentRecognition = null;
         currentDraft = null;
+        currentPayload = null;
+        editLog = [];
+        committed = new Map();
         showStep('step-upload');
       };
     }
@@ -943,31 +1594,7 @@
     const btnHistory = $('#btn-view-history');
     if (btnHistory) {
       btnHistory.onclick = function () {
-        const list = JSON.parse(localStorage.getItem('ig-mobile-uploads') || '[]');
-        const container = $('#history-list-container');
-        if (container) {
-          if (!list.length) {
-            container.innerHTML = '<p class="muted">目前尚無本機上傳紀錄。</p>';
-          } else {
-            container.innerHTML =
-              '<ul class="list">' +
-              list
-                .map(
-                  (item) =>
-                    '<li><b>' +
-                    item.no +
-                    '</b> · 金額 $' +
-                    item.sales +
-                    ' · 旋轉 ' +
-                    item.rotation +
-                    '°<br><small class="muted">' +
-                    item.date +
-                    '</small></li>'
-                )
-                .join('') +
-              '</ul>';
-          }
-        }
+        renderHistory();
         showStep('step-history');
       };
     }
