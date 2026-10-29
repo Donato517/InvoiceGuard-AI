@@ -162,11 +162,22 @@ def test_logout_rejects_other_host_or_malformed_origin(client: TestClient, origi
     assert response.status_code == 403
 
 
-def test_logout_clears_session_cookie(logged_in_client: TestClient) -> None:
+def test_logout_clears_session_cookie(
+    logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.clients import auth as auth_client
+
+    revoked_tokens: list[str] = []
+
+    async def fake_logout(token: str) -> None:
+        revoked_tokens.append(token)
+
+    monkeypatch.setattr(auth_client, "logout", fake_logout)
     response = logged_in_client.post("/logout")
 
     assert response.status_code == 303
     assert 'ig_session=""' in response.headers["set-cookie"]
+    assert revoked_tokens == ["test-access-token"]
 
 
 def test_qa_page_requires_login(client: TestClient) -> None:

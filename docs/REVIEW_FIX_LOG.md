@@ -386,3 +386,9 @@
 - 問題：使用者上傳完成後按「查看發票清單」進入 /invoices，畫面顯示 405 Method Not Allowed。原因：發票列表頁尚未規劃，API 的 GET /api/v1/invoices 仍是 TODO；同一路徑目前只有送出用的 POST，所以 GET 回 405。
 - 處理（依使用者指示）：先隱藏上傳結果步驟的「查看發票清單」按鈕（共用片段 _upload_review_steps.html，手機拍照頁與電腦上傳頁都適用），只留「繼續上傳／拍攝下一張」。頁首「我的發票」連結同樣指向 /invoices，未更動，待使用者決定。
 - 回歸：test_pages 兩個上傳頁都不含「查看發票清單」。check_project PASS；pytest 397 passed、54 skipped；ruff、djLint 通過。
+
+## 2026-10-29 Codex：GitHub Linux CI 登出測試隔離修正
+
+- 發佈前 GitHub Linux CI 發現 `test_logout_clears_session_cookie` 未替換 `auth_client.logout`，會嘗試連線 API，因既有封網 fixture 而失敗；Windows 的連線錯誤表現不同，本機通過不足以證明替身完整。
+- 修正：只在該測試加入非同步登出替身，保留 303 與清除 Cookie 斷言，另確認以正確的合成 Session 呼叫一次。未修改應用程式、未放寬網路防護。
+- 驗證：前台完整 pytest 397 passed、54 skipped；跨站 check_project、Ruff check／format、environment --check、djLint 25 樣板均通過。GitHub Linux／Windows 結果見 [PR #5](https://github.com/Donato517/InvoiceGuard-AI/pull/5)。

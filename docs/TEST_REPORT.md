@@ -936,3 +936,9 @@ STARTUP 42 筆清單只在讀取時處理 CRLF 並核對路徑與雜湊，原檔
 - 瀏覽器實跑（以前台實際渲染的 /invoices/upload，替身登入、可手動放行的假辨識回應，不連任何服務）：選 A.pdf 送辨識（按鈕顯示辨識中）→ 按「重新選擇檔案」（按鈕立即恢復）→ 選 B.pdf → A 的回應晚到：停在預覽步驟、未產生欄位、無錯誤提示 → B 送辨識 → 核對頁賣方名稱為 B 的結果。辨識遇到 Session 失效轉址時前往 /login?next=目前頁面。
 - 驗證：三站 check_project（--project-root）PASS；pytest API 716 passed／14 skipped、前台 395 passed／54 skipped、ADMIN 1193 passed／9 skipped；ruff check／format --check、environment --check 通過；前台 djLint 25 檔 0 錯誤、`node --check` 通過；API／ADMIN supabase_storage.py 逐位元組相同。
 - 未驗證：經 START 連正式 API 的實際上傳；headless 瀏覽器中 PDF 內容的實際渲染（Codex 回報 headless Chrome 檢視器內容空白，屬自動化環境待確認）。
+
+## 2026-10-29 Codex：發佈前登出測試隔離
+
+- GitHub Ubuntu CI 的登出清除 Cookie 測試因未模擬 API 登出而觸發既有網路阻擋；補上非同步替身並驗證合成 Session 的撤銷呼叫，不修改正式登出功能或封網 fixture。
+- Windows 一般使用者權限重跑：pytest 397 passed、54 skipped、1 個既有 TestClient／httpx warning；跨站 check_project、Ruff check／format、environment 靜態檢查均通過；djLint 25 樣板、0 errors。所有暫存與報告放在專案外，沒有連正式服務。
+- GitHub Linux／Windows 檢查以 [PR #5 的 CI 結果](https://github.com/Donato517/InvoiceGuard-AI/pull/5/checks) 為準。
