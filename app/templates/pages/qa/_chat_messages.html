@@ -1,0 +1,11 @@
+{#
+  @template pages/qa/_chat_messages.html
+  @description 對話訊息列表片段；POST /qa/ask 的 HTMX 回應直接回傳此片段。
+  @context messages: list[dict]  [{role, text, sources}]
+#}
+{% for message in messages %}
+  <div class="chat__message {% if message.role == 'user' %}chat__message--user{% endif %}">
+    {{ message.text }}
+    {% if message.sources %}<div class="chat__sources">來源：{{ message.sources | join("、") }}</div>{% endif %}
+  </div>
+{% endfor %}

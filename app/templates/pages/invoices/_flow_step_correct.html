@@ -1,0 +1,69 @@
+{#
+  @template pages/invoices/_flow_step_correct.html
+  @description 步驟 3：採購核對並修正辨識欄位（HTML 原型 flowStep 2）。
+  @route POST /invoices/{invoice_id}/flow/correct → API PATCH 發票；格式驗證放 Pydantic Schema（發票號碼 ^[A-Z]{2}\d{8}$、統編 8 碼）
+  @context invoice: dict       發票資料
+  @context field_errors: dict  欄位名稱 → 錯誤訊息，沒有錯誤時為空 dict
+#}
+<form method="post"
+      action="/invoices/{{ invoice.id }}/flow/correct"
+      class="form">
+  <div class="form-grid">
+    <div class="form-field">
+      <label for="invoice_number">發票號碼</label>
+      <input id="invoice_number"
+             name="invoice_number"
+             value="{{ invoice.invoice_number }}"
+             maxlength="10"
+             required>
+      {% if field_errors.invoice_number %}<small class="alert alert--danger">{{ field_errors.invoice_number }}</small>{% endif %}
+    </div>
+    <div class="form-field">
+      <label for="invoice_date">發票日期</label>
+      <input id="invoice_date"
+             name="invoice_date"
+             type="date"
+             value="{{ invoice.invoice_date }}"
+             required>
+    </div>
+    <div class="form-field">
+      <label for="seller_tax_id">賣方統編</label>
+      <input id="seller_tax_id"
+             name="seller_tax_id"
+             value="{{ invoice.seller_tax_id or '' }}"
+             maxlength="8"
+             inputmode="numeric">
+    </div>
+    <div class="form-field">
+      <label for="buyer_tax_id">買方統編</label>
+      <input id="buyer_tax_id"
+             name="buyer_tax_id"
+             value="{{ invoice.buyer_tax_id or '' }}"
+             maxlength="8"
+             inputmode="numeric">
+    </div>
+    <div class="form-field">
+      <label for="net_amount">未稅金額</label>
+      <input id="net_amount"
+             name="net_amount"
+             type="number"
+             min="0"
+             step="1"
+             value="{{ invoice.net_amount }}">
+    </div>
+    {# 稅額與總額由後端計算後顯示，不開放輸入（原型為 readonly） #}
+    <div class="form-field">
+      <label for="tax_amount">營業稅（5%）</label>
+      <input id="tax_amount" value="{{ invoice.tax_amount }}" readonly>
+    </div>
+    <div class="form-field">
+      <label for="total_amount">含稅總額</label>
+      <input id="total_amount" value="{{ invoice.total_amount }}" readonly>
+    </div>
+  </div>
+  <p class="alert alert--warning">修改後會重設審核狀態，須重新經過財務審核。</p>
+  <div class="flow-footer">
+    <a href="/invoices/{{ invoice.id }}/flow?step=2" class="btn btn--secondary">← 上一步</a>
+    <button type="submit" class="btn btn--primary">儲存並送出檢核</button>
+  </div>
+</form>

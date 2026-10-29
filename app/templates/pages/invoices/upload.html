@@ -1,25 +1,48 @@
 {#
   @template pages/invoices/upload.html
-  @description 上傳發票：選擇圖片或 PDF 後送出，完成後導向發票詳情查看分析結果。
+  @description 上傳發票（電腦選檔）：選擇本機的 JPG／PNG 影像或單頁 PDF → 預覽 → AI 辨識（經 API）→ 核對修正（標記使用者修改的欄位）→ 查重 → 送出；與手機拍照頁共用 mobile-camera.js 與步驟片段。
   @route GET /invoices/upload（需登入）
+  @context upload_mode: str  固定為 "file"
 #}
 {% extends "layouts/default.html" %}
 {% block title %}上傳發票{% endblock %}
+{% block head %}
+  <link rel="stylesheet"
+        href="{{ static_url('css/pages/mobile-camera.css') }}">
+{% endblock head %}
 {% block content %}
-  <h1>上傳發票</h1>
-  {# TODO(JerryChien): POST /invoices/upload 完成後移除 disabled #}
-  <form method="post"
-        action="/invoices/upload"
-        enctype="multipart/form-data"
-        class="form">
-    <div class="form-field">
-      <label for="file">發票檔案（JPG / PNG / PDF）</label>
-      <input id="file"
-             name="file"
-             type="file"
-             accept="image/jpeg,image/png,application/pdf"
-             required>
+  <main class="mobile-app-shell mobile-app-shell--wide"
+        data-upload-mode="{{ upload_mode }}">
+    {# 頁面標頭與步驟說明 #}
+    <div class="heading">
+      <h1>上傳發票</h1>
+      <p class="muted">選擇檔案 → 預覽 → 辨識 → 核對 → 查重 → 上傳</p>
     </div>
-    <button type="submit" class="btn btn--primary" disabled>上傳（建置中）</button>
-  </form>
+    {# 步驟 1：選擇本機檔案 #}
+    <section id="step-upload" class="mobile-step-section">
+      <div class="mobile-card">
+        <h2 class="mobile-card__title">選擇發票檔案</h2>
+        <p class="mobile-card__desc">一個檔案一張發票；送出前會由 AI 辨識欄位，再由您核對修正。</p>
+        <div class="mobile-dropzone">
+          <label class="btn btn--primary">
+            選擇本機檔案
+            <input id="file-album-upload"
+                   type="file"
+                   accept="image/jpeg,image/png,application/pdf"
+                   hidden>
+          </label>
+          <p class="mobile-dropzone__hint">JPG / PNG 影像 10 MB 以內（辨識前自動縮小）；PDF 4 MB 以內且只有一頁</p>
+        </div>
+      </div>
+    </section>
+    {% include "pages/invoices/_upload_review_steps.html" %}
+    <div class="alert alert--info">
+      <h2>📱 手機端採購拍照上傳</h2>
+      <p>支援手機相機外框即時對齊、90° 旋轉校正與 AI 辨識欄位自動帶入核對。</p>
+      <a href="/invoices/mobile-upload" class="btn btn--primary">開啟手機拍照上傳</a>
+    </div>
+  </main>
 {% endblock content %}
+{% block scripts %}
+  <script src="{{ static_url('js/mobile-camera.js') }}" defer></script>
+{% endblock scripts %}

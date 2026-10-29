@@ -57,6 +57,11 @@ def create_router(configuration: Settings) -> APIRouter:
     async def mobile_page(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(request, "pages/dev/mobile.html")
 
+    @router.get("/mobile/upload")
+    async def mobile_upload_alias() -> RedirectResponse:
+        """導向手機拍照上傳頁面。"""
+        return RedirectResponse("/invoices/mobile-upload", status_code=303)
+
     @router.get("/api-status")
     @router.get("/__dev/api-health")
     async def api_health() -> JSONResponse:

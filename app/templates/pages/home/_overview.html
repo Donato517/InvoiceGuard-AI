@@ -1,0 +1,83 @@
+{#
+  @template pages/home/_overview.html
+  @description 作業總覽片段（HTML 原型 renderDashboard）；登入後由 pages/home/index.html 以 include 引入。
+  @context summary: dict        {total, done, pending, awaiting_review}，由 API 計算
+  @context pending: list[dict]  待處理發票 [{id, invoice_number, item, next_step_label, progress_percent}]
+  @context done: list[dict]     已完成發票，欄位同上
+#}
+<div class="page-header">
+  <div>
+    <h1>作業總覽</h1>
+    <p class="muted">查看已完成與待處理作業。</p>
+  </div>
+  <a href="/invoices/upload" class="btn btn--primary">＋ 上傳新發票</a>
+</div>
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-card__label">發票總數</div>
+    <div class="stat-card__value">{{ summary.total }}</div>
+  </div>
+  <div class="stat-card stat-card--success">
+    <div class="stat-card__label">已完成</div>
+    <div class="stat-card__value">{{ summary.done }}</div>
+  </div>
+  <div class="stat-card stat-card--warning">
+    <div class="stat-card__label">待處理</div>
+    <div class="stat-card__value">{{ summary.pending }}</div>
+  </div>
+  <div class="stat-card stat-card--danger">
+    <div class="stat-card__label">待財務審核</div>
+    <div class="stat-card__value">{{ summary.awaiting_review }}</div>
+  </div>
+</div>
+<section class="card">
+  <h2 class="card__title">待辦事項</h2>
+  {% for item in pending %}
+    <div class="todo-item">
+      <div>
+        {{ item.invoice_number or "新發票" }} · {{ item.item }}
+        <div class="muted">下一步：{{ item.next_step_label }}</div>
+      </div>
+      <a href="/invoices/{{ item.id }}/flow" class="btn btn--secondary btn--small">前往處理 →</a>
+    </div>
+  {% else %}
+    <p class="empty-state">全部處理完成</p>
+  {% endfor %}
+</section>
+{% for title, rows in [("待處理發票", pending), ("已完成發票", done)] %}
+  <section class="card">
+    <h2 class="card__title">{{ title }}</h2>
+    {% if rows %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">發票號碼</th>
+            <th scope="col">品名</th>
+            <th scope="col">進度</th>
+            <th scope="col">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in rows %}
+            <tr>
+              <td>{{ item.invoice_number or "新發票" }}</td>
+              <td>{{ item.item }}</td>
+              <td>
+                <progress class="progress"
+                          max="100"
+                          value="{{ item.progress_percent }}"
+                          aria-label="完成進度">{{ item.progress_percent }}%</progress>
+                <small class="muted">{{ item.next_step_label }}</small>
+              </td>
+              <td>
+                <a href="/invoices/{{ item.id }}/flow" class="btn btn--small">檢視／繼續</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty-state">目前沒有符合條件的發票</p>
+    {% endif %}
+  </section>
+{% endfor %}

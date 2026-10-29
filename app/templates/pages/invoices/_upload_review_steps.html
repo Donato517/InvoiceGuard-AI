@@ -1,0 +1,163 @@
+{#
+  @template pages/invoices/_upload_review_steps.html
+  @description 發票上傳共用步驟 2～5（預覽、核對修正與修改標記、查重確認、上傳結果）；手機拍照頁與電腦上傳頁共用，由 mobile-camera.js 操作。
+  @context upload_mode: str  "camera"（手機拍照頁）或 "file"（電腦選檔上傳頁，另可上傳單頁 PDF）
+#}
+{# 步驟 2：確認影像與方向（旋轉預覽；PDF 直接顯示原檔、不旋轉） #}
+<section id="step-preview" class="mobile-step-section" hidden>
+  <div class="mobile-card">
+    <span class="mobile-step-pill">步驟 2：確認影像與方向</span>
+    <h2 class="mobile-card__title">預覽與旋轉</h2>
+    <p class="mobile-card__desc">
+      {% if upload_mode == "file" %}
+        影像方向不正確時可左轉或右轉 90°；PDF 直接以原檔辨識，不旋轉。
+      {% else %}
+        若拍攝方向不正確，可左轉或右轉 90°；原始照片完整保留，不進行裁切。
+      {% endif %}
+    </p>
+    <div class="preview-box">
+      <img id="preview-img"
+           src="{{ static_url('img/reference_invoice.jpg') }}"
+           alt="發票影像預覽">
+      <iframe id="preview-pdf" class="preview-pdf" title="PDF 預覽" hidden></iframe>
+    </div>
+    <a id="preview-pdf-link"
+       class="preview-pdf-link"
+       target="_blank"
+       rel="noopener"
+       hidden>在新分頁開啟 PDF</a>
+    <div id="rotate-controls">
+      <div class="rotate-toolbar">
+        <button type="button" id="btn-rotate-left" class="btn btn--secondary">↶ 左轉 90°</button>
+        <button type="button" id="btn-rotate-right" class="btn btn--secondary">↷ 右轉 90°</button>
+        <button type="button" id="btn-rotate-restore" class="btn btn--secondary">還原原圖</button>
+      </div>
+      <p id="rotation-angle-text" class="rotation-status">目前方向：0°（順時針） · 後續辨識使用這個版本</p>
+    </div>
+    <div class="mobile-actions">
+      <button type="button" id="btn-retake-preview" class="btn btn--secondary">
+        {% if upload_mode == "file" %}
+          重新選擇檔案
+        {% else %}
+          重拍 / 重新選取
+        {% endif %}
+      </button>
+      <button type="button" id="btn-recognize" class="btn btn--primary">辨識內容</button>
+    </div>
+  </div>
+</section>
+{# 步驟 3：檢查辨識內容（欄位依 API 辨識結果產生，對應 invoices／invoice_items） #}
+<section id="step-fields" class="mobile-step-section" hidden>
+  <div class="mobile-card">
+    <span class="mobile-step-pill">步驟 3：檢查辨識內容</span>
+    <h2 class="mobile-card__title">核對修正</h2>
+    <div class="preview-box">
+      <img id="check-preview-img"
+           src="{{ static_url('img/reference_invoice.jpg') }}"
+           alt="發票縮圖">
+      <iframe id="check-preview-pdf" class="preview-pdf" title="PDF 預覽" hidden></iframe>
+    </div>
+    <div class="alert alert--warning">
+      <p id="recognition-summary">AI 辨識結果，請對照影像逐欄核對。</p>
+      <ul id="recognition-warnings" class="recognition-warnings" hidden>
+      </ul>
+    </div>
+    <div id="fields-container">
+      {# 欄位由 JS 依 API 辨識結果產生 #}
+    </div>
+    <details class="ai-json-panel">
+      <summary>AI 回傳 JSON</summary>
+      <pre id="ai-json"></pre>
+    </details>
+    <label class="ack-checkbox-row">
+      <input type="checkbox" id="uploaderAck">
+      <span>我已核對影像與辨識內容，確認資料正確。</span>
+    </label>
+    <div class="mobile-actions">
+      <button type="button" id="btn-retake-fields" class="btn btn--secondary">
+        {% if upload_mode == "file" %}
+          重新選擇檔案
+        {% else %}
+          重拍
+        {% endif %}
+      </button>
+      <button type="button" id="btn-confirm-fields" class="btn btn--primary">上傳者確認</button>
+    </div>
+  </div>
+</section>
+{# 步驟 4：查重後確認上傳 #}
+<section id="step-confirm" class="mobile-step-section" hidden>
+  <div class="mobile-card">
+    <span class="mobile-step-pill">步驟 4：查重後確認上傳</span>
+    <h2 class="mobile-card__title">查重與最後確認</h2>
+    <p class="mobile-card__desc">資料尚未送出；查重通過並確認後才建立發票（待單位核准）。辨識後 1 小時內需送出。</p>
+    <div class="card">
+      <p>
+        字軌號碼：<strong id="sum-invoice-no"></strong>
+      </p>
+      <p>
+        賣方統一編號：<strong id="sum-seller-tax-id"></strong>
+      </p>
+      <p>
+        銷售額合計：$<strong id="sum-sales-amount"></strong>
+      </p>
+      <p>
+        總計：$<strong id="sum-total-amount"></strong>
+      </p>
+    </div>
+    {# 與 AI 辨識值不同的欄位；送出後寫入 invoice_field_reviews 供審核標示 #}
+    <div id="modified-summary" class="alert">
+      <p id="modified-title"></p>
+      <ul id="modified-list" class="recognition-warnings" hidden>
+      </ul>
+    </div>
+    <button type="button" id="btn-check-duplicate" class="btn btn--primary">系統檢查發票是否重複</button>
+    <div id="dup-alert-box" class="duplicate-alert" hidden></div>
+    <div id="final-submit-group" hidden>
+      <label class="ack-checkbox-row">
+        <input type="checkbox" id="finalAck">
+        <span>確認將發票資料與辨識時的{{ "檔案" if upload_mode == "file" else "影像" }}上傳至系統。</span>
+      </label>
+      <button type="button" id="btn-final-upload" class="btn btn--success">確認上傳至系統</button>
+    </div>
+    <div class="mobile-actions">
+      <button type="button" id="btn-back-fields" class="btn btn--secondary">返回檢查／修改</button>
+    </div>
+  </div>
+</section>
+{# 步驟 5：上傳成功結果 #}
+<section id="step-success" class="mobile-step-section" hidden>
+  <div class="mobile-card">
+    <div class="alert alert--success">
+      <h2 class="mobile-card__title">✓ 發票已成功上傳！</h2>
+      <p>
+        字軌號碼：<strong id="success-invoice-no"></strong>
+      </p>
+      <p>
+        影像方向校正：<strong id="success-rotation">0°</strong>
+      </p>
+      <p>
+        案件狀態：<strong id="success-status">待單位核准</strong>
+      </p>
+      <p>
+        使用者修改欄位：<strong id="success-modified"></strong>
+      </p>
+      <p class="muted">發票資料與辨識時的{{ "檔案" if upload_mode == "file" else "影像" }}已送出，等待請款單位核准。</p>
+    </div>
+    <div id="success-warnings" class="alert alert--warning" hidden>
+      <p>系統檢核提醒（已記錄，審核時確認）：</p>
+      <ul id="success-warning-list" class="recognition-warnings">
+      </ul>
+    </div>
+    <div class="mobile-actions">
+      <button type="button" id="btn-upload-next" class="btn btn--primary">
+        {% if upload_mode == "file" %}
+          繼續上傳下一張
+        {% else %}
+          繼續拍攝下一張
+        {% endif %}
+      </button>
+      {# 「查看發票清單」暫不顯示：發票列表頁尚未規劃，API GET /api/v1/invoices 尚未實作（點了會出現 405） #}
+    </div>
+  </div>
+</section>

@@ -1,0 +1,586 @@
+/**
+ * 模組名稱：mobile-camera.css
+ * 功能說明：手機端採購拍照上傳、即時外框對齊與影像旋轉預覽樣式。
+ */
+
+/* ==========================================================================
+   相機即時對齊畫面（全螢幕遮罩）
+   ========================================================================== */
+#cameraOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  background: #050b13;
+  color: #fff;
+  overflow: hidden;
+  font: 14px / 1.5 system-ui, -apple-system, sans-serif;
+}
+
+#cameraOverlay:fullscreen {
+  height: 100vh;
+  width: 100vw;
+}
+
+#cameraStage {
+  position: absolute;
+  inset: 0;
+}
+
+#liveCamera {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+#alignGuide {
+  --align: #ff6872;
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid var(--align);
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 55%);
+  color: var(--align);
+  border-radius: 4px;
+  transition: border-color 0.2s ease;
+}
+
+#fieldSvg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+
+#fieldSvg .zoneBox {
+  stroke: #b9dbf7;
+  stroke-width: 1;
+  stroke-dasharray: 5 5;
+  fill: none;
+  opacity: 0.55;
+}
+
+#alignGuide.noLabels .zone {
+  display: none;
+}
+
+#alignGuide .corner {
+  position: absolute;
+  width: 23px;
+  height: 23px;
+  border: 4px solid var(--align);
+}
+
+#alignGuide .tl {
+  left: -2px;
+  top: -2px;
+  border-right: 0;
+  border-bottom: 0;
+}
+
+#alignGuide .tr {
+  right: -2px;
+  top: -2px;
+  border-left: 0;
+  border-bottom: 0;
+}
+
+#alignGuide .bl {
+  left: -2px;
+  bottom: -2px;
+  border-right: 0;
+  border-top: 0;
+}
+
+#alignGuide .br {
+  right: -2px;
+  bottom: -2px;
+  border-left: 0;
+  border-top: 0;
+}
+
+.cameraTop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: calc(10px + env(safe-area-inset-top)) 12px 16px;
+  background: linear-gradient(rgb(0 0 0 / 70%), transparent);
+}
+
+.cameraTitle {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.camControls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+#cameraOverlay button {
+  padding: 6px 11px;
+  background: rgb(17 36 58 / 85%);
+  border: 1px solid rgb(255 255 255 / 35%);
+  border-radius: var(--radius-sm, 4px);
+  color: #fff;
+  font-size: 12px;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+
+#cameraOverlay button.selected {
+  background: #0d9488;
+  border-color: #2dd4bf;
+}
+
+.cameraBottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 12px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgb(0 0 0 / 85%));
+  text-align: center;
+}
+
+.cameraBottom .feedback {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cameraBottom .feedback small {
+  display: block;
+  font-weight: 400;
+  color: #bdd3e3;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.cameraBottom .manualNote {
+  display: block;
+  font-size: 11px;
+  color: #afc7d8;
+  margin-top: 6px;
+}
+
+#cameraOverlay #shutter {
+  display: block;
+  margin: 10px auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  font-size: 32px;
+  background: rgb(255 255 255 / 25%);
+  color: #fff;
+  line-height: 1;
+  padding: 0;
+}
+
+#cameraOverlay #shutter:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#cameraError {
+  background: #52252b;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #ffccd0;
+}
+
+/* 橫向螢幕自適應 */
+#cameraOverlay.wide .cameraTop {
+  width: 90px;
+  height: 100%;
+  padding: 10px 6px;
+  background: linear-gradient(90deg, rgb(0 0 0 / 75%), transparent);
+  right: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+#cameraOverlay.wide .cameraTitle {
+  font-size: 11px;
+  text-align: center;
+}
+
+#cameraOverlay.wide .camControls {
+  flex-direction: column;
+  gap: 5px;
+}
+
+#cameraOverlay.wide .camControls button {
+  width: 78px;
+  font-size: 11px;
+  padding: 5px 4px;
+}
+
+#cameraOverlay.wide .cameraBottom {
+  left: auto;
+  top: 0;
+  right: 0;
+  width: 90px;
+  height: 100%;
+  padding: 8px 6px;
+  background: linear-gradient(270deg, rgb(0 0 0 / 80%), transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#cameraOverlay.wide .feedback {
+  font-size: 11px;
+  word-break: break-all;
+}
+
+#cameraOverlay.wide .feedback small {
+  font-size: 9px;
+}
+
+#cameraOverlay.wide .manualNote {
+  font-size: 9px;
+}
+
+#cameraOverlay.wide #shutter {
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  margin: 12px 0;
+}
+
+/* ==========================================================================
+   手機端頁面流程（採購拍照上傳與旋轉預覽）
+   ========================================================================== */
+.mobile-app-shell {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+/* 電腦上傳頁：同一流程，畫面較寬 */
+.mobile-app-shell--wide {
+  max-width: 760px;
+}
+
+/* PDF 預覽（電腦上傳頁）；不設定 display，hidden 屬性才會生效 */
+.preview-pdf {
+  width: 100%;
+  height: 360px;
+  border: 0;
+  background: #fff;
+}
+
+.preview-pdf-link {
+  font-size: 0.875rem;
+}
+
+/* 全站 img 設有 display，需明確讓 hidden 生效（影像與 PDF 預覽切換） */
+.preview-box img[hidden],
+.preview-box iframe[hidden] {
+  display: none;
+}
+
+.mobile-card {
+  background: #fff;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #dbe4ef);
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
+}
+
+.mobile-card__title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-top: 0;
+  margin-bottom: 8px;
+  color: var(--color-text, #12243a);
+}
+
+.mobile-card__desc {
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #64748b);
+  margin-bottom: 16px;
+}
+
+.mobile-dropzone {
+  padding: 24px 14px;
+  text-align: center;
+  background: #f8fbff;
+  border: 2px dashed #b9d2ec;
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: 14px;
+}
+
+.mobile-dropzone__hint {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #64748b);
+  margin-top: 8px;
+}
+
+.rotate-toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.rotate-toolbar .btn {
+  font-size: 0.875rem;
+  padding: 6px 12px;
+}
+
+.rotation-status {
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted, #64748b);
+  margin: 8px 0;
+}
+
+.preview-box {
+  padding: 12px;
+  background: #edf2f7;
+  border-radius: var(--radius-md, 8px);
+  min-height: 200px;
+  max-height: 380px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+
+.preview-box img {
+  max-width: 100%;
+  max-height: 350px;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 12%);
+  transition: transform 0.2s ease;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.field-group label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #475569);
+  margin-bottom: 4px;
+}
+
+.field-group input,
+.field-group select {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.9375rem;
+  background: #fff;
+}
+
+/* API 檢核提醒（欄位下方） */
+.field-warning {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+/* 使用者修改過的欄位（與 AI 辨識值不同） */
+.field-modified {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-primary, #2563eb);
+}
+
+.field-group.is-modified input,
+.field-group.is-modified select,
+.item-row input.is-modified {
+  border-color: var(--color-primary, #2563eb);
+  background: var(--color-primary-soft, #eff6ff);
+}
+
+.field-group.is-modified > label::after {
+  content: "　已修改";
+  color: var(--color-primary, #2563eb);
+}
+
+/* 字軌與號碼並排 */
+.field-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 8px;
+}
+
+.field-note {
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+.recognition-warnings {
+  margin: 6px 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+/* 品名明細：品名一整列，數量／單價／金額三欄 */
+.items-section__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #475569);
+  margin-bottom: 4px;
+}
+
+.item-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: var(--color-bg-muted, #f9fafb);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-sm, 4px);
+}
+
+.item-row input {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.9375rem;
+}
+
+.item-row__title,
+.item-row .item-row__item_name,
+.item-row__note,
+.item-row__remove {
+  grid-column: 1 / -1;
+}
+
+.item-row.is-modified,
+.item-row.is-new {
+  border-color: var(--color-primary, #2563eb);
+}
+
+.item-row__status {
+  color: var(--color-primary, #2563eb);
+}
+
+#deleted-items {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.item-row__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted, #64748b);
+}
+
+.item-row__caption {
+  margin-bottom: -4px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted, #64748b);
+}
+
+.item-row__remove {
+  justify-self: end;
+  font-size: 0.8125rem;
+  padding: 4px 10px;
+}
+
+/* AI 回傳 JSON（辨識紀錄） */
+.ai-json-panel {
+  margin: 12px 0;
+  font-size: 0.8125rem;
+}
+
+.ai-json-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ai-json-panel pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--radius-sm, 4px);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.ack-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  background: #f1f5f9;
+  border-radius: var(--radius-sm, 4px);
+  margin: 14px 0;
+  font-size: 0.875rem;
+}
+
+.ack-checkbox-row input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.mobile-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.mobile-step-pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.duplicate-alert {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 0.875rem;
+  margin: 12px 0;
+}
+
+.duplicate-alert--ok {
+  background: #e6f5f0;
+  color: #1b634e;
+  border: 1px solid #a7e3ce;
+}
+
+.duplicate-alert--warn {
+  background: #ffeded;
+  color: #a52323;
+  border: 1px solid #fecaca;
+}
+
+#btn-check-duplicate {
+  margin-top: 10px;
+}

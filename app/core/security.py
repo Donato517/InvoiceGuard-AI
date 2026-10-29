@@ -2,7 +2,7 @@
 模組名稱：app.core.security
 功能說明：登入 cookie 讀寫、登入後導向網址檢查（防 open redirect）、同源檢查（防 CSRF）。
 注意事項：
-    - API 的 access token 存在 httpOnly cookie，瀏覽器端 JavaScript 讀不到，降低 XSS 竊取風險。
+    - API 的 Session Token 存在 httpOnly cookie，瀏覽器端 JavaScript 讀不到，降低 XSS 竊取風險。
     - cookie 設定 SameSite=Lax，並對會變更資料的 POST 請求加上 verify_same_origin 檢查。
 """
 
@@ -16,12 +16,19 @@ from app.core.config import settings
 from app.core.exceptions import ForbiddenError
 
 
-def set_session_cookie(response: Response, access_token: str) -> None:
-    """登入成功後寫入登入 cookie。"""
+def set_session_cookie(response: Response, session_token: str, max_age: int | None = None) -> None:
+    """登入成功後寫入登入 cookie。
+
+    Args:
+        response: 要寫入 cookie 的回應。
+        session_token: API 登入回傳的 Session Token。
+        max_age: API 回傳的 Session 有效秒數；cookie 不超過此值與 SESSION_MAX_AGE_SECONDS。
+    """
+    limit = settings.SESSION_MAX_AGE_SECONDS
     response.set_cookie(
         SESSION_COOKIE_NAME,
-        access_token,
-        max_age=settings.SESSION_MAX_AGE_SECONDS,
+        session_token,
+        max_age=limit if max_age is None else min(max_age, limit),
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
@@ -36,7 +43,7 @@ def clear_session_cookie(response: Response) -> None:
 
 
 def get_session_token(request: Request) -> str | None:
-    """從 cookie 取得 access token；未登入時回傳 None。"""
+    """從 cookie 取得 Session Token；未登入時回傳 None（是否仍有效須經 API 核對）。"""
     return request.cookies.get(SESSION_COOKIE_NAME) or None
 
 

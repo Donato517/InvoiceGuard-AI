@@ -1,0 +1,61 @@
+{#
+  @template pages/invoices/mobile_upload.html
+  @description 手機端｜採購拍照上傳：相機外框對齊、影像旋轉、AI 辨識（經 API）、欄位核對（標記使用者修改的欄位）、查重與送出。
+  @route GET /invoices/mobile-upload
+  @context upload_mode: str  固定為 "camera"（共用步驟片段 _upload_review_steps.html 依此切換文字）
+#}
+{% extends "layouts/default.html" %}
+{% block title %}手機端｜採購拍照上傳{% endblock %}
+{% block head %}
+  <link rel="stylesheet"
+        href="{{ static_url('css/pages/mobile-camera.css') }}">
+{% endblock head %}
+{% block content %}
+  <main class="mobile-app-shell" data-upload-mode="{{ upload_mode }}">
+    {# 頁面標頭與步驟說明 #}
+    <div class="heading">
+      <span class="mobile-step-pill">MOBILE / PROCUREMENT</span>
+      <h1>採購拍照上傳</h1>
+      <p class="muted">對準外框，確認後再上傳 · 拍攝 → 旋轉預覽 → 辨識 → 核對 → 查重 → 上傳</p>
+    </div>
+    {# 步驟 1：新增影像（拍照 / 相簿選取） #}
+    <section id="step-upload" class="mobile-step-section">
+      <div class="mobile-card">
+        <h2 class="mobile-card__title">新增發票影像</h2>
+        <p class="mobile-card__desc">對準整張發票外邊框，內部欄位線僅供位置參考。</p>
+        <div class="mobile-dropzone">
+          <button type="button" id="btn-open-camera" class="btn btn--primary">📷 開啟全螢幕相機</button>
+          <p class="mobile-dropzone__hint">只需對齊整張發票外邊框，相機會自動輔助判斷紅綠燈。</p>
+          <label class="btn btn--secondary">
+            從相簿選取
+            <input id="file-album-upload"
+                   type="file"
+                   accept="image/jpeg,image/png"
+                   hidden>
+          </label>
+          <p class="mobile-dropzone__hint">支援 JPG / PNG，10 MB 以內</p>
+        </div>
+        <div class="mobile-actions">
+          <button type="button" id="btn-use-demo" class="btn btn--secondary">使用示範發票</button>
+          <button type="button" id="btn-view-history" class="btn btn--secondary">查看上傳紀錄</button>
+        </div>
+      </div>
+    </section>
+    {% include "pages/invoices/_upload_review_steps.html" %}
+    {# 步驟 6：上傳紀錄檢視 #}
+    <section id="step-history" class="mobile-step-section" hidden>
+      <div class="mobile-card">
+        <h2 class="mobile-card__title">本機上傳紀錄</h2>
+        <div id="history-list-container">
+          <p class="muted">載入中…</p>
+        </div>
+        <div class="mobile-actions">
+          <button type="button" id="btn-back-from-history" class="btn btn--secondary">返回拍攝</button>
+        </div>
+      </div>
+    </section>
+  </main>
+{% endblock content %}
+{% block scripts %}
+  <script src="{{ static_url('js/mobile-camera.js') }}" defer></script>
+{% endblock scripts %}
