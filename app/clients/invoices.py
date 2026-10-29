@@ -75,8 +75,13 @@ async def fetch_invoices(
     return await request_json("GET", "/invoices", token=token, params=params)
 
 
-async def fetch_invoice(token: str, invoice_id: int) -> dict[str, Any]:
-    """取得單張發票詳情，含明細與 AI 分析結果（GET /invoices/{id}）。"""
+async def fetch_invoice(token: str, invoice_id: str) -> dict[str, Any]:
+    """取得單張發票詳情，含明細與 AI 分析結果（GET /invoices/{id}）。
+
+    Args:
+        token: 使用者的 access token。
+        invoice_id: 發票 ID；正式為 UUID 字串（API 端點尚未實作，見 DEVELOPMENT_STATUS）。
+    """
     return await request_json("GET", f"/invoices/{invoice_id}", token=token)
 
 

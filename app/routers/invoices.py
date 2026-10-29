@@ -1,7 +1,7 @@
 """
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/mobile-upload、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
     （詳情為確認畫面骨架：只讀取與呈現，尚無修改／重新檢核／提交路由）
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
@@ -10,7 +10,9 @@
     - 發票流程 1～3 步驟由前台採購端執行，後續步驟 4～9 轉由後台審核。
 """
 
+import re
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -18,10 +20,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.clients import invoices as invoices_client
 from app.constants import INVOICE_FLOW_STEPS, INVOICE_STATUS_LABEL
+from app.core.config import settings
 from app.core.deps import AccessToken
 from app.core.security import verify_same_origin
 from app.core.templating import templates
 from app.routers.auth import require_session
+from app.utils.demo_invoice import DEMO_INVOICE_ID, build_demo_invoice
 from app.utils.invoice_confirmation import build_confirmation_view
 
 # 全部發票頁面需登入：每次經 API 核對 Session
@@ -209,15 +213,54 @@ async def mobile_upload_submit(payload: MobileUploadRequest, token: AccessToken)
     return await invoices_client.submit_invoice(token, payload.model_dump())
 
 
-@router.get("/{invoice_id}", response_class=HTMLResponse)
-async def invoice_detail(request: Request, token: AccessToken, invoice_id: int) -> HTMLResponse:
-    """發票確認畫面：14 類業務欄位、明細與規則檢核結果（僅呈現，不修改、不提交）。"""
-    # 待整合：API 尚未提供 GET /invoices/{id}，欄位 key 也是 C 組暫定 fixture key（見 invoice_fields.py）
-    invoice = await invoices_client.fetch_invoice(token, invoice_id)
+# 舊骨架的正整數 ID：1～18 位 ASCII 數字、不為 0（全形數字不符合）
+_LEGACY_ID_PATTERN = re.compile(r"(?=[0-9]*[1-9])[0-9]{1,18}")
+
+
+def _normalize_detail_id(invoice_id: str) -> str:
+    """詳情 ID：接受 UUID（正式）或正整數（舊骨架）；其他一律 404，不把任意字串轉給 API。"""
+    # 長度先限制再轉 int：超長數字字串會觸發 Python 的位數上限（ValueError → 500），也不該轉給 API
+    if _LEGACY_ID_PATTERN.fullmatch(invoice_id):
+        return str(int(invoice_id))
+    try:
+        return str(UUID(invoice_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="找不到指定發票") from None
+
+
+@router.get("/demo/detail", response_class=HTMLResponse)
+async def invoice_detail_demo(request: Request) -> HTMLResponse:
+    """詳情頁的本機虛構展示（測試資料／非正式案件）；僅 APP_ENV=local 且非 Vercel，否則 404。
+
+    仍受 require_session 保護；不呼叫 API 或 DB。正式詳情失敗時不會導向這裡，也不會改用此資料。
+    """
+    if settings.APP_ENV != "local" or settings.is_vercel:
+        raise HTTPException(status_code=404, detail="找不到頁面")
     return templates.TemplateResponse(
         request,
         "pages/invoices/detail.html",
-        {"invoice_id": invoice_id, "view": build_confirmation_view(invoice)},
+        {
+            "invoice_id": DEMO_INVOICE_ID,
+            "view": build_confirmation_view(build_demo_invoice()),
+            "is_demo": True,
+        },
+    )
+
+
+@router.get("/{invoice_id}", response_class=HTMLResponse)
+async def invoice_detail(request: Request, token: AccessToken, invoice_id: str) -> HTMLResponse:
+    """發票確認畫面：14 類業務欄位、明細、案件狀態與提交輪次、規則檢核結果與 AI 原值差異（僅呈現）。"""
+    # 待整合：API 尚未提供 GET /invoices/{id}，欄位 key 也是 C 組暫定 fixture key（見 invoice_fields.py）
+    normalized_id = _normalize_detail_id(invoice_id)
+    invoice = await invoices_client.fetch_invoice(token, normalized_id)
+    return templates.TemplateResponse(
+        request,
+        "pages/invoices/detail.html",
+        {
+            "invoice_id": normalized_id,
+            "view": build_confirmation_view(invoice),
+            "is_demo": False,
+        },
     )
 
 

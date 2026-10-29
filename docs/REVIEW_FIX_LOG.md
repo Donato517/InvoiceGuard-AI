@@ -392,3 +392,27 @@
 - 發佈前 GitHub Linux CI 發現 `test_logout_clears_session_cookie` 未替換 `auth_client.logout`，會嘗試連線 API，因既有封網 fixture 而失敗；Windows 的連線錯誤表現不同，本機通過不足以證明替身完整。
 - 修正：只在該測試加入非同步登出替身，保留 303 與清除 Cookie 斷言，另確認以正確的合成 Session 呼叫一次。未修改應用程式、未放寬網路防護。
 - 驗證：前台完整 pytest 397 passed、54 skipped；跨站 check_project、Ruff check／format、environment --check、djLint 25 樣板均通過。GitHub Linux／Windows 結果見 [PR #5](https://github.com/Donato517/InvoiceGuard-AI/pull/5)。
+
+## 2026-10-29 Claude：C 組 A＋B 詳情頁複查修正（前台）
+
+- 完成範圍（離線）：API warnings 轉接與欄位提示；詳情的 UUID／狀態／提交輪次、AI 原值差異、本機虛構展示頁。正式詳情 GET API 仍未提供，未做瀏覽器人工驗收，不視為已整合驗收。
+- 缺陷 1：`_normalize_detail_id` 對超長數字字串轉 int 會觸發 Python 位數上限而 500。現況：舊整數 ID 限 1～18 位 ASCII 數字且不為 0，其餘（含 19 位以上、全零）回 404 且不呼叫 API；UUID、`0007` 等合法 ID 與 `/invoices/{id}/flow` 不受影響。回歸：`test_detail_rejects_overlong_numeric_ids_with_404_not_500`、`test_detail_accepts_largest_legacy_id_and_leading_zeros`。（複查時發現此修正已存在於工作區，本輪僅確認並通過測試。）
+- 缺陷 2：AI 與提交明細筆數不同時，位置比對會把刪除／插入造成的位移誤判為確定的「已修改」。修正：筆數不同時列狀態降為 `modified_reference`（「與同位置 AI 列不同（僅供參考）」），並顯示「明細筆數與 AI 原始值不同，逐列比對僅供參考」；筆數相同時保留「已修改」，但顯示無列識別資訊、無法確認是否調整順序的限制。只改前台 view model 與樣板，未動 invoice_changes、invoice_field_reviews、API、DB。
+- 已知限制（暫緩）：金額／日期／字軌不做標準化比較（與 API `_canonical_value` 不同，待整合）；展示頁未加 IP 限制；APP_ENV 預設 local。
+- 驗證：pytest 668 passed、54 skipped；JS 16 passed；Ruff check／format、djLint、check_project 通過。
+
+## 2026-10-29 Claude：C 組 A＋B 第三輪畫面問題（前台）
+
+- 問題 1：檢核摘要只計 error／warning，嚴重度缺失或不認得的訊息（展示頁與目前 API warnings 皆無 severity）雖列在下方卻沒有計數，畫面顯示「錯誤 0、警告 0」會讓人誤以為全部通過。修正：`ValidationView` 新增 `unknown_count`，摘要顯示「未知等級 N」，N > 0 時提示「有 N 筆檢核訊息的嚴重度未知，請逐筆確認，不代表檢核通過。」；未知等級不升級為 error／warning，`has_blocking_error` 仍只看 error。檔案：`validation_view.py`、`detail.html`、`components.css`（僅新增詳情摘要專用的 `.validation-summary__item--unknown`）。
+- 問題 2：離線展示頁有看似可操作的「提交」按鈕（實際為 type="button"，無 form、無 JS 綁定，不會送出任何請求）。修正：`is_demo` 時不輸出按鈕，只顯示「展示頁不提供提交（離線展示，沒有任何送出行為）。」，不受檢核結果影響；`is_demo` 為 false 時原按鈕、disabled 狀態與提示不變。
+- 證據（本機測試，新增 9 個）：全未知／混合計數／大小寫與空白正規化／無 issue／提示顯示與隱藏／展示頁無 `id="submit-control"` 且加入 error 後說明不變／正式詳情頁按鈕保留。pytest 677 passed、54 skipped；JS 16 passed；Ruff、djLint、check_project 通過。
+- 仍待處理：正式詳情 GET API 尚未接通；金額／日期／字軌標準化與 API `_canonical_value` 待對齊；明細位置比對限制（無列識別資訊）；瀏覽器尚待最後複查。展示資料未加入 severity，保留 API 缺少 severity 的情境。
+
+## 2026-10-29 Claude：C 組詳情頁 UI 視覺對齊與手機版明細警示排版（前台）
+
+- 範圍：只改 `app/templates/pages/invoices/detail.html`、新增 `app/static/css/pages/invoice-detail.css` 與對應測試；規則限定 `.invoice-detail`，無 `!important`，只有詳情頁載入；未改全站 Design Tokens、共用 layout／header、ADMIN、API、DB 或任何 Python 資料邏輯。
+- 視覺對齊：參考 `invoiceguard_final_formatted.html`（展示原型，非已核定規範）的卡片、badge、notice、表頭與捲動表格；色票為頁面內暫時性 `--idt-*`，待全站 Tokens 統一。小字對比不足 4.5:1 者（表頭、灰／橘標籤、紅字）改用同色相較深文字色。案件狀態九種的分類：已核准＝綠；待申請中＝灰；三種待核准／覆核＝藍；兩種退回＝橘；已駁回＝紅；已作廢與未知＝灰虛線，退回、駁回、作廢不會顯示成通過。
+- 問題 1（手機版明細警示被裁切）：警示放在明細表內的 `<tr class="row-issues">`（colspan 整列），表格最小寬度 640px 且位於橫向捲動容器內，375px 下警示只能靠捲動閱讀，長代碼被右緣裁掉。處理：刪除表格內該列，改在捲動容器之外、表格下方以獨立卡片依列分組顯示（標題「第 N 筆明細（品名）」，沿用 `class="row-issues" data-line-no`）；「明細整體」警示維持原區域；沒有列警示時不輸出空容器；每筆警示只出現一次。`issue_list` 輸出與 DTO 皆未改。
+- 問題 2（表格數字被拆行）：容器的 `overflow-wrap: anywhere` 套用到表格格子，使 250 在窄欄顯示成 25／0。處理：表格格子改回 `overflow-wrap: normal`。
+- 證據（本機）：新增結構測試（以 HTML 解析器檢查：卡片在 `</table>` 之後且在捲動容器外、無 `<tr class="row-issues">`、`data-line-no` 與列序號一致、警示只出現一次、整體警示不移入列卡片、無列警示不輸出容器）及樣式範圍測試（CSS 全部以 `.invoice-detail` 開頭、無 `!important`）。pytest 697 passed、54 skipped；JS 16 passed；Ruff、djLint、check_project 通過。瀏覽器實測（內建瀏覽器，免登入本機展示頁）：375px 無水平溢出、明細表可在容器內橫向捲動、警示卡片完整可讀、以約 100 字元長代碼測試可換行且頁面寬度不變；1280px 無重複警示。
+- 未處理／待辦：前台共用頁首導覽在 375px 換行（跨組，交 A 組或組長）；全站色票與斷點未對齊原型；平板寬度與真實手機未實測；正式詳情 GET API 仍未接通；金額／日期／字軌標準化與 API `_canonical_value` 待對齊；明細依位置比對，無列識別資訊。

@@ -4,7 +4,10 @@
 注意事項：
     - 只負責畫面呈現，不決定案件流程（workflow）狀態；validation 與 workflow 是不同層次。
     - 同一欄位的多筆 issue 全部保留；無法對應到畫面欄位的 issue 放入 general_issues，不會被丟棄。
-    - 不認得的 severity 不視為 error 也不視為 warning，標示為「未知等級」並保留顯示。
+    - 不認得的 severity 不視為 error 也不視為 warning，標示為「未知等級」並保留顯示，另計入 unknown_count；
+      unknown 不阻擋提交（has_blocking_error 只看 error），摘要須另外顯示，不能讓使用者誤以為全部通過。
+    - line_no／field_path／expected／actual／difference 為選用欄位：來源沒給就是 None，
+      本模組不推算、不從 message 文字解析；目前 API 的 FieldWarning 只有 field／code／message。
 """
 
 from collections.abc import Iterable, Mapping
@@ -34,6 +37,16 @@ class IssueView:
     severity: str
     message: str
     raw_field: str
+    field_path: str | None = None
+    line_no: int | None = None
+    expected: str | None = None
+    actual: str | None = None
+    difference: str | None = None
+
+    @property
+    def has_comparison(self) -> bool:
+        """來源是否提供預期值或實際值（任一即可顯示對照）；沒提供就不顯示。"""
+        return self.expected is not None or self.actual is not None
 
     @property
     def severity_label(self) -> str:
@@ -59,6 +72,7 @@ class ValidationView:
     general_issues: tuple[IssueView, ...]
     error_count: int
     warning_count: int
+    unknown_count: int = 0
 
     @property
     def has_blocking_error(self) -> bool:
@@ -81,6 +95,21 @@ def normalize_severity(value: Any) -> str:
     return text if text in (SEVERITY_ERROR, SEVERITY_WARNING) else SEVERITY_UNKNOWN
 
 
+def _optional_text(value: Any) -> str | None:
+    """選用文字欄位：None 與空白字串視為未提供；bool 不當作文字；其餘轉成字串。"""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_line_no(value: Any) -> int | None:
+    """明細序號（從 1 起算）：只接受正整數；其他一律視為未提供，不猜測列位置。"""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
 def _to_issue_view(raw: Any) -> IssueView:
     """將單筆原始 issue 轉為 IssueView；格式不符時仍保留，訊息退回為原內容文字。"""
     if not isinstance(raw, Mapping):
@@ -90,6 +119,11 @@ def _to_issue_view(raw: Any) -> IssueView:
         severity=normalize_severity(raw.get("severity")),
         message=str(raw.get("message") or ""),
         raw_field=str(raw.get("field") or ""),
+        field_path=_optional_text(raw.get("field_path")),
+        line_no=_optional_line_no(raw.get("line_no")),
+        expected=_optional_text(raw.get("expected")),
+        actual=_optional_text(raw.get("actual")),
+        difference=_optional_text(raw.get("difference")),
     )
 
 
@@ -105,11 +139,12 @@ def present_issues(issues: Iterable[Any] | None, field_map: Mapping[str, str]) -
     """
     grouped: dict[str, list[IssueView]] = {}
     general: list[IssueView] = []
-    errors = warnings = 0
+    errors = warnings = unknowns = 0
     for raw in issues or ():
         issue = _to_issue_view(raw)
         errors += issue.severity == SEVERITY_ERROR
         warnings += issue.severity == SEVERITY_WARNING
+        unknowns += issue.severity == SEVERITY_UNKNOWN
         ui_field_id = field_map.get(issue.raw_field)
         if ui_field_id is None:
             general.append(issue)
@@ -120,4 +155,5 @@ def present_issues(issues: Iterable[Any] | None, field_map: Mapping[str, str]) -
         general_issues=tuple(general),
         error_count=errors,
         warning_count=warnings,
+        unknown_count=unknowns,
     )

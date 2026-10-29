@@ -1,0 +1,322 @@
+/* ==========================================================================
+   發票詳情頁（pages/invoices/detail.html）專用樣式
+   所有規則限定在 .invoice-detail 容器內，不影響其他頁面；不使用 !important。
+
+   視覺參考：InvoiceGuard-AI-Other/invoiceguard_final_formatted.html（展示原型，非已核定的設計規範）。
+   下方 --idt-* 為「暫時性」的原型色票，只存在於本頁容器。
+   TODO：前台全站 Design Tokens 與原型對齊後，改為引用全站變數並刪除本區塊。
+
+   無障礙調整：原型的部分小字配色對比不足 4.5:1（表頭 4.0、灰標籤 4.3、橘標籤 4.2、
+   紅字 3.9），這些文字改用同色相較深的色碼（--idt-*-text），背景與色相維持原型。
+   ========================================================================== */
+
+.invoice-detail {
+  /* 原型色票 */
+  --idt-navy: #102c52;
+  --idt-blue: #216de0;
+  --idt-green: #219764;
+  --idt-orange: #db891c;
+  --idt-red: #d34b49;
+  --idt-text: #23344d;
+  --idt-line: #e3eaf3;
+  --idt-card-title: #1d4a8f;
+  --idt-th-bg: #f6f9fd;
+  --idt-th-text: #60738c;
+  /* 狀態底色與文字（文字為達到 4.5:1 的較深色） */
+  --idt-info-bg: #eef5ff;
+  --idt-info-text: #42648c;
+  --idt-ok-bg: #e6f6ec;
+  --idt-ok-text: #23774d;
+  --idt-attn-bg: #fff2da;
+  --idt-attn-text: #8a5a14;
+  --idt-bad-bg: #fff0ef;
+  --idt-bad-text: #b23f3d;
+  --idt-neutral-bg: #edf2f8;
+  --idt-neutral-text: #55677f;
+  --idt-muted: #5b6e86;
+
+  min-width: 0;
+  color: var(--idt-text);
+  overflow-wrap: anywhere;
+}
+
+.invoice-detail h1 {
+  font-size: var(--font-size-xl);
+  color: var(--idt-navy);
+}
+
+/* ---- 卡片（欄位區塊） ---- */
+.invoice-detail .field-block {
+  margin-bottom: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background-color: var(--color-bg);
+  border: 1px solid var(--idt-line);
+  border-radius: 14px;
+  box-shadow: 0 3px 12px #17345b04;
+}
+
+.invoice-detail .field-block--has-issue {
+  border-color: var(--idt-orange);
+}
+
+.invoice-detail .field-block__label {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-lg);
+  color: var(--idt-card-title);
+}
+
+.invoice-detail .field-block__value {
+  margin: var(--space-1) 0;
+}
+
+.invoice-detail .field-block__part {
+  color: var(--idt-muted);
+}
+
+.invoice-detail .field-block__original {
+  color: var(--idt-muted);
+}
+
+.invoice-detail .field-block__issues {
+  margin-top: var(--space-3);
+}
+
+/* ---- 案件狀態標籤（顏色只是輔助，標籤文字不變） ---- */
+.invoice-detail .idt-badge {
+  display: inline-block;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  background-color: var(--idt-neutral-bg);
+  color: var(--idt-neutral-text);
+}
+
+.invoice-detail .idt-badge--ok {
+  background-color: var(--idt-ok-bg);
+  color: var(--idt-ok-text);
+}
+
+.invoice-detail .idt-badge--info {
+  background-color: var(--idt-info-bg);
+  color: var(--idt-info-text);
+}
+
+.invoice-detail .idt-badge--attention {
+  background-color: var(--idt-attn-bg);
+  color: var(--idt-attn-text);
+}
+
+.invoice-detail .idt-badge--negative {
+  background-color: var(--idt-bad-bg);
+  color: var(--idt-bad-text);
+  border: 1px solid var(--idt-red);
+}
+
+.invoice-detail .idt-badge--void,
+.invoice-detail .idt-badge--unknown {
+  border: 1px dashed var(--idt-neutral-text);
+}
+
+/* ---- 檢核摘要 ---- */
+.invoice-detail .validation-summary {
+  flex-wrap: wrap;
+  align-items: center;
+  background-color: var(--color-bg);
+  border: 1px solid var(--idt-line);
+  border-radius: 14px;
+}
+
+.invoice-detail .validation-summary__item {
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: var(--font-size-sm);
+  background-color: var(--idt-neutral-bg);
+  color: var(--idt-neutral-text);
+}
+
+.invoice-detail .validation-summary__item--error {
+  background-color: var(--idt-bad-bg);
+  color: var(--idt-bad-text);
+}
+
+.invoice-detail .validation-summary__item--warning {
+  background-color: var(--idt-attn-bg);
+  color: var(--idt-attn-text);
+}
+
+.invoice-detail .validation-summary__item--unknown {
+  border: 1px dashed var(--idt-neutral-text);
+}
+
+.invoice-detail .issue__notice {
+  background-color: var(--idt-attn-bg);
+  color: var(--idt-attn-text);
+}
+
+/* ---- 提示文字（form-hint）：預設為輔助文字；特定提示用原型的 notice 外觀 ---- */
+.invoice-detail .form-hint {
+  color: var(--idt-muted);
+}
+
+.invoice-detail .form-hint[data-unknown-notice],
+.invoice-detail .form-hint[data-original-notice],
+.invoice-detail .form-hint[data-row-count-mismatch],
+.invoice-detail .form-hint[data-row-compare-limited],
+.invoice-detail .form-hint[data-removed-rows],
+.invoice-detail .form-hint[data-demo-submit-note] {
+  padding: 12px 15px;
+  border-radius: 9px;
+  line-height: 1.7;
+  background-color: var(--idt-info-bg);
+  color: var(--idt-info-text);
+}
+
+/* 未知嚴重度：中性灰，不使用紅或橘 */
+.invoice-detail .form-hint[data-unknown-notice] {
+  background-color: var(--idt-neutral-bg);
+  color: var(--idt-neutral-text);
+}
+
+/* ---- 檢核 issue ---- */
+.invoice-detail .issue {
+  padding: var(--space-1) var(--space-3);
+  color: var(--idt-text);
+  border-left: 4px solid var(--idt-neutral-text);
+}
+
+.invoice-detail .issue--error {
+  color: var(--idt-text);
+  border-left-color: var(--idt-red);
+}
+
+.invoice-detail .issue--warning {
+  color: var(--idt-text);
+  border-left-color: var(--idt-orange);
+}
+
+/* 未知等級：虛線灰框，視覺上不同於已確定的 error／warning */
+.invoice-detail .issue--unknown {
+  border-left-style: dashed;
+  border-left-color: var(--idt-neutral-text);
+}
+
+.invoice-detail .issue__level {
+  font-weight: 600;
+  color: var(--idt-neutral-text);
+}
+
+.invoice-detail .issue--error .issue__level {
+  color: var(--idt-bad-text);
+}
+
+.invoice-detail .issue--warning .issue__level {
+  color: var(--idt-attn-text);
+}
+
+.invoice-detail .issue__code,
+.invoice-detail .issue__line,
+.invoice-detail .issue__compare {
+  display: inline-block;
+  margin-right: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--idt-muted);
+}
+
+/* ---- AI 原值比對：已修改使用中性藍（不是驗證失敗），僅供參考／無原值使用灰 ---- */
+.invoice-detail [data-original-status] {
+  color: var(--idt-neutral-text);
+}
+
+.invoice-detail small.field-block__original-status {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 2px 8px;
+  border-radius: 20px;
+  background-color: var(--idt-neutral-bg);
+}
+
+.invoice-detail [data-original-status="unchanged"] {
+  color: var(--idt-ok-text);
+}
+
+.invoice-detail [data-original-status="modified"],
+.invoice-detail [data-original-status="added"] {
+  color: var(--idt-info-text);
+  background-color: var(--idt-info-bg);
+}
+
+.invoice-detail [data-original-status="modified_reference"] {
+  border-bottom: 1px dashed var(--idt-neutral-text);
+}
+
+/* ---- 明細表：獨立橫向捲動容器，頁面本身不應水平捲動 ---- */
+.invoice-detail__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.invoice-detail .table {
+  min-width: 40rem;
+  font-size: var(--font-size-sm);
+}
+
+.invoice-detail .table th {
+  background-color: var(--idt-th-bg);
+  color: var(--idt-th-text);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.invoice-detail .table th,
+.invoice-detail .table td {
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--idt-line);
+}
+
+.invoice-detail .table td {
+  vertical-align: top;
+  /* 表格在自己的捲動容器內，數字不可被拆開（容器預設的 anywhere 只給一般文字用） */
+  overflow-wrap: normal;
+}
+
+/* ---- 明細列檢核訊息：位於表格捲動容器之外，窄螢幕可完整換行 ---- */
+.invoice-detail__row-issues {
+  margin-top: var(--space-3);
+}
+
+.invoice-detail .row-issues {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg);
+  border: 1px solid var(--idt-line);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+
+.invoice-detail .row-issues__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-base);
+  color: var(--idt-card-title);
+}
+
+.invoice-detail .empty-state {
+  padding: 25px;
+  text-align: center;
+  color: var(--idt-muted);
+}
+
+/* ---- 鍵盤 focus：保留明顯外框 ---- */
+.invoice-detail a:focus-visible,
+.invoice-detail button:focus-visible,
+.invoice-detail [tabindex]:focus-visible,
+.invoice-detail__table-wrap:focus-visible {
+  outline: 2px solid var(--idt-blue);
+  outline-offset: 2px;
+}
+
+@media (max-width: 800px) {
+  .invoice-detail .field-block {
+    padding: var(--space-3) var(--space-4);
+  }
+}

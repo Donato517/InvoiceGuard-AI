@@ -82,8 +82,17 @@ FIXTURE_ITEM_KEYS: dict[str, str] = {
     "F09": "amount",
 }
 
-# validation issue 的 field 值 → UI field_id；找不到的 issue 會保留為 general issue，不會被丟棄
+# 明細整體區域的 issue 識別碼（不是 14 類欄位之一）：field 為 "items" 但沒有明細序號時使用
+ITEMS_OVERALL_ID = "ITEMS"
+
+# validation issue 的 field 值 → UI field_id；找不到的 issue 會保留為 general issue，不會被丟棄。
+# 前半為 fixture key，後半為 API FieldWarning.field 目前出現的名稱（API invoice_upload_service）。
 FIXTURE_ISSUE_FIELD_TO_UI: dict[str, str] = {
+    "is_triplicate": "F01",
+    "invoice_number": "F02",
+    "tax_period": "F03",
+    "seller_tax_id": "F14",
+    "items": ITEMS_OVERALL_ID,
     "form_type": "F01",
     "track_number": "F02",
     "invoice_date": "F03",

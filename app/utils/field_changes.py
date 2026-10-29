@@ -264,3 +264,58 @@ def detect_field_changes(original: Mapping[str, Any], current: Mapping[str, Any]
             item_changes.append(ItemRowChange(index, "modified", changes))
 
     return FieldChangeSet(tuple(field_changes), tuple(item_changes))
+
+
+# ---- 單欄比較（唯讀；供詳情頁分類 AI 原值狀態，不屬於 detect_field_changes）----
+
+OriginalStatus = Literal[
+    "unchanged", "modified", "original_null", "field_missing", "no_snapshot", "not_comparable"
+]
+
+
+@dataclass(frozen=True)
+class OriginalComparison:
+    """單一欄位與 AI 原始快照的比較結果；僅供畫面使用，不是儲存格式。
+
+    Attributes:
+        status: unchanged＝原值與目前值一致；modified＝不同；original_null＝快照有此欄位但原值為空
+            （None 或空白字串）；field_missing＝快照存在但沒有此欄位；no_snapshot＝沒有 AI 快照；
+            not_comparable＝值的型別不支援比較（例如 float、list），不猜測。
+        original: 快照中的原值；只有 unchanged／modified 有意義，其餘為 None。
+        current: 呼叫端傳入的目前值。
+    """
+
+    status: OriginalStatus
+    original: Any
+    current: Any
+
+
+def compare_to_original(
+    original_snapshot: Mapping[str, Any] | None, key: str, current: Any
+) -> OriginalComparison:
+    """比較單一欄位的目前值與 AI 原始快照；只讀，不修改輸入，也不改變 detect_field_changes 的行為。
+
+    比較用文字的規則與 detect_field_changes 相同（去前後空白；int／Decimal 以 str() 轉文字）。
+    「沒有快照」「快照沒有這個欄位」「原值為空」是三種不同狀態，都不會被當成未修改。
+
+    Args:
+        original_snapshot: AI 原始值快照；None 或非 Mapping 視為整份快照不存在。
+        key: 欄位在快照中的 key。
+        current: 人工確認／提交後的目前值。
+
+    Returns:
+        OriginalComparison。
+    """
+    if not isinstance(original_snapshot, Mapping):
+        return OriginalComparison("no_snapshot", None, current)
+    if key not in original_snapshot:
+        return OriginalComparison("field_missing", None, current)
+    original = original_snapshot[key]
+    try:
+        before = _comparable(original, key)
+        after = _comparable(current, key)
+    except TypeError:
+        return OriginalComparison("not_comparable", None, current)
+    if before is None:
+        return OriginalComparison("original_null", None, current)
+    return OriginalComparison("unchanged" if before == after else "modified", original, current)

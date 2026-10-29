@@ -273,6 +273,10 @@
   color: var(--color-warning);
 }
 
+.validation-summary__item--unknown {
+  color: var(--color-text-muted);
+}
+
 .submit-area {
   margin-top: var(--space-4);
 }
