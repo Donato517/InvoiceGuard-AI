@@ -1,6 +1,7 @@
 {#
   @template partials/header.html
-  @description 前台頁首：Logo、主要導覽、登入 / 登出。登出使用 POST 表單（避免被連結誤觸發）。
+  @description 前台頁首：Logo、主要導覽、登入者與目前部門、登入 / 登出。登出使用 POST 表單（避免被連結誤觸發）。
+  @context request.state.current_user: dict | 未設定  需登入頁面經 API /auth/me 核對後的登入者（routers/auth.py require_session）
 #}
 <header class="app-header">
   <nav class="app-header__nav container" aria-label="主選單">
@@ -8,6 +9,10 @@
     <a href="/invoices">我的發票</a>
     <a href="/invoices/upload">上傳發票</a>
     {% if request.cookies.get(SESSION_COOKIE_NAME) %}
+      {% set current_user = request.state.current_user %}
+      {% if current_user %}
+        <span>{{ current_user.display_name }}｜{{ current_user.department.department_name }}</span>
+      {% endif %}
       <form method="post" action="/logout" data-confirm="確定要登出嗎？">
         <button type="submit" class="btn btn--text">登出</button>
       </form>

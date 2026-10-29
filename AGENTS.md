@@ -13,11 +13,11 @@
 - `InvoiceGuard-AI`（前台）：使用者網站；不連 DB、Storage 或模型服務，伺服器端經 `app/clients/` 以 `API_BASE_URL` 呼叫 API 平台串聯雲端；不持有公司機密。
 - `InvoiceGuard-AI-ADMIN`（後台）：管理網站；以自己的 DB 模組與 Vercel 模組直接串聯雲端，不經 API 平台。
 - `InvoiceGuard-AI-API`（後端 API）：供前台伺服器呼叫的 REST API、第三方串接與排程；以自己的 DB 模組與 Vercel 模組串聯雲端；共用 DB Schema 與 Alembic 的唯一管理者。
-- ADMIN／API 的模組：DB 模組 `app/db`；Vercel 模組（檔案存取）`app/integrations/supabase_storage.py`。`app/integrations/vercel.py` 只是執行環境資訊與設定檢查。
+- ADMIN／API 的模組：DB 模組 `app/db`；Vercel 模組（檔案存取）`app/integrations/supabase_storage.py`；AI 模組 `app/integrations/document_ai.py`（Document AI OCR）、`gemini.py`、`groq.py` 與共用的 `chat_models.py`（2026-10-29 起兩站同版；ADMIN 只提供模組，尚未接線功能）。`app/integrations/vercel.py` 只是執行環境資訊與設定檢查。
 - `/dev` 是示範檔案，不是串聯路徑；示範的就是上述模組：ADMIN `/dev/accounts` 示範 DB 模組、`/dev/files` 示範 Vercel 模組，只在本機開放。API 也可以有 `/dev` 示範檔案，但本機開發與前台都不串接 API 的 `/dev`。
 - 三站各自部署於 Vercel：前台 `https://invoice-guard-ai.vercel.app`、API `https://invoice-guard-ai-api.vercel.app`、ADMIN `https://invoice-guard-ai-admin.vercel.app`。三站共用的公開網址、網站名稱、圖示與搜尋引擎設定集中在 `app/core/constants.py`。
 - 三站可互相連結，但一律不被搜尋引擎收錄：網頁 `<meta name="robots">` 與 `vercel.json` 的 `X-Robots-Tag` 為 `noindex, nofollow`；`/robots.txt` 不封鎖抓取，否則搜尋引擎讀不到 noindex。
-- 三站內容相同、修改時須同步三站的檔案：`app/core/environment.py`（由 `check_project` 快照比對）、`app/core/constants.py`、`app/routers/robots.py`、`tests/unit/test_constants.py`（後三者手動同步，檢查程式不比對）；ADMIN 與 API 的 `app/integrations/supabase_storage.py` 亦相同。
+- 三站內容相同、修改時須同步三站的檔案：`app/core/environment.py`（由 `check_project` 快照比對）、`app/core/constants.py`、`app/routers/robots.py`、`tests/unit/test_constants.py`（後三者手動同步，檢查程式不比對）；ADMIN 與 API 的 `app/integrations/supabase_storage.py` 與四個 AI 模組檔亦相同，由兩站相同的 `tests/unit/test_shared_integrations.py` 在兩站同目錄時逐位元組比對。
 - 功能完成度以各站 `docs/DEVELOPMENT_STATUS.md` 與實際程式為準；本機日常啟動見下方「本機入口」。
 
 ## 共同規則
@@ -31,7 +31,7 @@
 
 - 業務程式一律從 `app.core.config.settings` 取得設定，不自行讀取 `.env`、列印環境變數或新增任意設定透傳。公開設定須依核定欄位與驗證規則擴充。
 - 公司機密（DB 密碼、S3 Key、模型 Key、Supabase secret key、session／cron secret）由雲端管理，不放 Git、測試報告、日誌、URL 或公開設定端點；測試只用明確的合成假值與替身。
-- 本機例外（2026-10-25 使用者核定）：START 以 Vercel CLI 讀取 ADMIN／API 各自專案的 Production 設定，只把 `DATABASE_URL`、`S3_*`、`SUPABASE_STORAGE_BUCKET` 注入本機該站程序記憶體，前台不取得；其他公司機密出現在本機程序環境時，站台拒絕啟動。
+- 本機例外（2026-10-25 使用者核定，2026-10-28、2026-10-29 擴充）：START 以 Vercel CLI 讀取 ADMIN／API 各自專案的 Production 設定，把 `DATABASE_URL`、`S3_*`、`SUPABASE_STORAGE_BUCKET` 注入本機該站程序記憶體；ADMIN 與 API 另各自注入自己專案的 Google Document AI／Gemini 設定（`GOOGLE_CLOUD_PROJECT_ID`、`GOOGLE_CLOUD_LOCATION`、`DOCUMENT_AI_PROCESSOR_ID`、`GOOGLE_SERVICE_ACCOUNT_JSON`、`GEMINI_API_KEY`）與 Groq 金鑰（`GROQ_API_KEY`）（API 2026-10-28、ADMIN 2026-10-29 核定；ADMIN 只有 DB／S3 為啟動必要，AI 設定缺少時 START 只提示）；前台不取得。這些是必要設定，值只存在 START 啟動的該站程序記憶體（不經 START、不在該站 venv 程序內就取不到），不視為本機禁用機密；START 未注入的其他公司機密出現在本機程序環境時，站台仍拒絕啟動。
 - 因此本機 ADMIN／API 連到的是正式（Production）DB 與 Storage，本機寫入就是正式資料寫入。`APP_ENV=local` 不能繞過登入、部門權限或正式 API 驗證；唯一例外是 ADMIN 只在本機開放的 `/dev` 示範檔案。
 - 未經使用者明確授權，不部署、不執行 migration、不修改正式資料、不 Commit／Merge／Push；保留既有分支、未提交修改及索引，不執行 reset 或覆蓋他人工作。建立 migration 檔屬 API 的一般開發，執行仍需授權。
 

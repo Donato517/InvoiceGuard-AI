@@ -86,12 +86,33 @@ def client() -> TestClient:
     return TestClient(app, follow_redirects=False)
 
 
+SYNTHETIC_SESSION = {
+    "user_id": "11111111-1111-4111-8111-111111111111",
+    "email": "user@example.com",
+    "display_name": "測試使用者",
+    "expires_at": "2026-10-28T12:00:00Z",
+    "department": {
+        "department_id": "22222222-2222-4222-8222-222222222222",
+        "department_code": "purchasing_d",
+        "department_name": "採購部",
+        "is_primary": True,
+    },
+    "departments": [],
+}
+
+
 @pytest.fixture
-def logged_in_client() -> TestClient:
-    """已登入的瀏覽器（帶假的登入 cookie）。"""
+def logged_in_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """已登入的瀏覽器：帶假的登入 cookie，API /auth/me 以替身回傳合成 Session。"""
+    from app.clients import auth as auth_client
     from app.constants import SESSION_COOKIE_NAME
     from app.main import app
 
+    async def fetch_me(token: str) -> dict[str, Any]:
+        assert token == "test-access-token"
+        return SYNTHETIC_SESSION
+
+    monkeypatch.setattr(auth_client, "fetch_me", fetch_me)
     test_client = TestClient(app, follow_redirects=False)
     test_client.cookies.set(SESSION_COOKIE_NAME, "test-access-token")
     return test_client
