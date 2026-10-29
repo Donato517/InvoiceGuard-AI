@@ -1,0 +1,28 @@
+/* 發票圖片選取與預覽（partials/image_picker.html 專用） */
+.image-picker__error {
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.image-picker__preview {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.image-picker__image {
+  max-width: 100%;
+  max-height: 24rem;
+  object-fit: contain;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+}
+
+.image-picker[data-state="error"] input[type="file"] {
+  border-color: var(--color-danger);
+}
+
+/* hidden 屬性需勝過 display: grid */
+.image-picker [hidden] {
+  display: none;
+}

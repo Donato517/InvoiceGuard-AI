@@ -1,13 +1,102 @@
 {#
   @template pages/invoices/detail.html
-  @description 發票詳情：發票資料、明細、AI 風險分數與判斷理由。
+  @description 發票確認畫面骨架：14 類業務欄位、多筆明細、規則檢核 issue；提交控制只呈現畫面狀態。
   @route GET /invoices/{invoice_id}（需登入）
-  @context invoice_id: int 發票 ID
+  @context invoice_id: int           發票 ID
+  @context view: ConfirmationView    app.utils.invoice_confirmation 組出的畫面資料
+  @note 提交按鈕為 type="button"，沒有 form／action，不會送出任何請求；
+        enabled 只代表目前沒有 error，不代表案件已送審或核准。
 #}
 {% extends "layouts/default.html" %}
 {% block title %}發票詳情{% endblock %}
+{% macro issue_list(issues) %}
+  {% if issues %}
+    <ul class="issue-list">
+      {% for issue in issues %}
+        <li class="issue issue--{{ issue.severity }}"
+            data-severity="{{ issue.severity }}">
+          <span class="issue__level">{{ issue.severity_label }}</span>
+          {% if issue.code %}<span class="issue__code">{{ issue.code }}</span>{% endif %}
+          <span class="issue__message">{{ issue.message }}</span>
+          {% if issue.notice %}<span class="issue__notice">{{ issue.notice }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endmacro %}
 {% block content %}
   <h1>發票詳情 #{{ invoice_id }}</h1>
-  {# TODO(JerryChien): 顯示 invoice 資料；金額用 |currency、時間用 |taipei_datetime #}
-  <p class="empty-state">內容建置中</p>
+  <p class="form-hint">檢核規則版本：{{ view.rule_version }}　檢核時間：{{ view.checked_at }}</p>
+  <section class="validation-summary" aria-label="檢核摘要">
+    <span class="validation-summary__item validation-summary__item--error">錯誤 {{ view.validation.error_count }}</span>
+    <span class="validation-summary__item validation-summary__item--warning">警告 {{ view.validation.warning_count }}</span>
+    {% if view.validation.has_warning %}<span class="issue__notice">待人工確認</span>{% endif %}
+  </section>
+  {% if view.validation.general_issues %}
+    <section class="field-block field-block--general" aria-label="其他檢核訊息">
+      <h2 class="field-block__label">其他檢核訊息</h2>
+      {{ issue_list(view.validation.general_issues) }}
+    </section>
+  {% endif %}
+  {% for section in view.sections %}
+    {% if section.kind == "items" %}
+      <section class="field-block" data-field-group="items" aria-label="明細">
+        <h2 class="field-block__label">明細</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              {% for column in section.columns %}
+                <th scope="col" data-field-id="{{ column.field.field_id }}">{{ column.field.label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+              <tr>
+                {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="{{ section.columns | length }}" class="empty-state">沒有明細資料</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% for column in section.columns %}
+          {% if column.issues %}
+            <div class="field-block__issues"
+                 data-field-id="{{ column.field.field_id }}">
+              <strong>{{ column.field.label }}</strong>
+              {{ issue_list(column.issues) }}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% else %}
+      <section class="field-block {% if section.issues %}field-block--has-issue{% endif %}"
+               data-field-id="{{ section.field.field_id }}">
+        <h2 class="field-block__label">{{ section.field.order }}. {{ section.field.label }}</h2>
+        {% for part in section.parts %}
+          <p class="field-block__value">
+            {% if part.label %}<span class="field-block__part">{{ part.label }}：</span>{% endif %}
+            {{ part.value }}
+            {% if part.original %}<span class="field-block__original">（AI 原值：{{ part.original }}）</span>{% endif %}
+          </p>
+        {% endfor %}
+        {{ issue_list(section.issues) }}
+      </section>
+    {% endif %}
+  {% endfor %}
+  <div class="submit-area">
+    {# 僅畫面狀態：沒有 form／action，不送出任何請求 #}
+    <button type="button"
+            class="btn btn--primary"
+            id="submit-control"
+            {% if not view.submit_control_enabled %}disabled aria-disabled="true"{% endif %}>提交</button>
+    {% if not view.submit_control_enabled %}
+      <p class="form-hint">仍有錯誤，修正後才能提交。</p>
+    {% else %}
+      <p class="form-hint">提交功能尚未接線（僅畫面狀態）。</p>
+    {% endif %}
+  </div>
 {% endblock content %}

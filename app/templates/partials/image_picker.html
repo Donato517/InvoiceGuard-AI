@@ -1,0 +1,33 @@
+{#
+  @template partials/image_picker.html
+  @description 發票圖片選取與預覽區塊（C-IMG-01）；僅在瀏覽器端選取、驗證、預覽，不上傳。
+  @context max_bytes: int       允許的最大位元組數（必填；由呼叫頁面依規格決定，這裡不內建預設）
+  @context field_name: str      <input> 的 name，預設 "file"
+  @note 使用方式：{% include "partials/image_picker.html" %}，需放在 <form> 內才會有「未選取不得送出」的檢查。
+        尚未被任何頁面引用；接入上傳頁屬後續步驟。
+        前端檢查只是使用者體驗，後端上傳時必須再驗證。
+#}
+{% set picker_field = field_name | default("file") %}
+<link rel="stylesheet" href="{{ static_url('css/image-picker.css') }}">
+<div class="image-picker form-field"
+     data-image-picker
+     data-state="idle"
+     data-max-bytes="{{ max_bytes }}">
+  <label for="{{ picker_field }}">發票圖片（JPG / PNG）</label>
+  <input id="{{ picker_field }}"
+         name="{{ picker_field }}"
+         type="file"
+         accept="image/jpeg,image/png">
+  <p class="image-picker__error" data-image-picker-error role="alert" hidden></p>
+  <div class="image-picker__preview" data-image-picker-preview hidden>
+    <img class="image-picker__image"
+         data-image-picker-image
+         alt="所選發票圖片的預覽">
+    <p class="form-hint">
+      <span data-image-picker-name></span>
+      （<span data-image-picker-size></span>）
+    </p>
+    <button type="button" class="btn" data-image-picker-clear hidden>重新選取</button>
+  </div>
+</div>
+<script src="{{ static_url('js/image-picker.js') }}" defer></script>

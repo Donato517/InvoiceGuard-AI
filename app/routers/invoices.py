@@ -2,6 +2,7 @@
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、詳情（皆需登入）。
 路由：GET /invoices、GET /invoices/upload、GET /invoices/{invoice_id}
+    （詳情為確認畫面骨架：只讀取與呈現，尚無修改／重新檢核／提交路由）
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法，其他頁面依同樣模式實作。
 """
@@ -15,6 +16,7 @@ from app.clients import invoices as invoices_client
 from app.constants import INVOICE_STATUS_LABEL
 from app.core.deps import AccessToken
 from app.core.templating import templates
+from app.utils.invoice_confirmation import build_confirmation_view
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -46,8 +48,10 @@ async def invoice_upload_page(request: Request, token: AccessToken) -> HTMLRespo
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail(request: Request, token: AccessToken, invoice_id: int) -> HTMLResponse:
-    """發票詳情：發票資料、明細、AI 風險分數與判斷理由。"""
-    # TODO(JerryChien): invoice = await invoices_client.fetch_invoice(token, invoice_id)
+    """發票確認畫面：14 類業務欄位、明細與規則檢核結果（僅呈現，不修改、不提交）。"""
+    invoice = await invoices_client.fetch_invoice(token, invoice_id)
     return templates.TemplateResponse(
-        request, "pages/invoices/detail.html", {"invoice_id": invoice_id}
+        request,
+        "pages/invoices/detail.html",
+        {"invoice_id": invoice_id, "view": build_confirmation_view(invoice)},
     )
