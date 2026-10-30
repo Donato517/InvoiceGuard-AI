@@ -1,13 +1,202 @@
 {#
   @template pages/invoices/detail.html
-  @description 發票詳情：發票資料、明細、AI 風險分數與判斷理由。
+  @description 發票確認畫面骨架：14 類業務欄位、多筆明細、規則檢核 issue；提交控制只呈現畫面狀態。
   @route GET /invoices/{invoice_id}（需登入）
-  @context invoice_id: int 發票 ID
+  @context invoice_id: str           發票 ID（正式為 UUID 字串；舊骨架的正整數 ID 也接受）
+  @context is_demo: bool             是否為本機虛構展示資料（顯示「測試資料／非正式案件」橫幅）
+  @context view: ConfirmationView    app.utils.invoice_confirmation 組出的畫面資料
+            （明細 issue：有 line_no 者顯示在該列下方，field="items" 者顯示在明細整體區域）
+  @note 提交按鈕為 type="button"，沒有 form／action，不會送出任何請求；
+        enabled 只代表目前沒有 error，不代表案件已送審或核准。
 #}
 {% extends "layouts/default.html" %}
 {% block title %}發票詳情{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="{{ static_url('css/pages/invoice-detail.css') }}">
+{% endblock %}
+{% set STATUS_TONE = {
+  "approved": "ok",
+  "draft": "neutral",
+  "pending_department_approval": "info",
+  "pending_accounting_review": "info",
+  "pending_accounting_approval": "info",
+  "returned_to_applicant": "attention",
+  "returned_to_accounting": "attention",
+  "rejected": "negative",
+  "voided": "void"
+} %}
+{% set ORIGINAL_LABEL = {
+  "unchanged": "未修改",
+  "modified": "已修改",
+  "modified_reference": "與同位置 AI 列不同（僅供參考）",
+  "original_null": "AI 原值為空",
+  "field_missing": "無 AI 原值",
+  "not_comparable": "無法比對",
+  "partial": "部分欄位無 AI 原值",
+  "added": "新增列（AI 無此列）"
+} %}
+{% macro issue_list(issues) %}
+  {% if issues %}
+    <ul class="issue-list">
+      {% for issue in issues %}
+        <li class="issue issue--{{ issue.severity }}"
+            data-severity="{{ issue.severity }}">
+          <span class="issue__level">{{ issue.severity_label }}</span>
+          {% if issue.code %}<span class="issue__code">{{ issue.code }}</span>{% endif %}
+          <span class="issue__message">{{ issue.message }}</span>
+          {% if issue.notice %}<span class="issue__notice">{{ issue.notice }}</span>{% endif %}
+          {% if issue.line_no %}<span class="issue__line">第 {{ issue.line_no }} 筆明細</span>{% endif %}
+          {% if issue.has_comparison %}
+            <span class="issue__compare">
+              預期：{{ issue.expected if issue.expected is not none else "-" }}
+              ／實際：{{ issue.actual if issue.actual is not none else "-" }}
+              {% if issue.difference is not none %}／差異：{{ issue.difference }}{% endif %}
+            </span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endmacro %}
 {% block content %}
+<div class="invoice-detail">
   <h1>發票詳情 #{{ invoice_id }}</h1>
-  {# TODO(JerryChien): 顯示 invoice 資料；金額用 |currency、時間用 |taipei_datetime #}
-  <p class="empty-state">內容建置中</p>
+  {% if is_demo %}
+    <p class="alert alert--warning" role="note" data-demo-banner="true">
+      測試資料／非正式案件：此頁為本機虛構展示，不來自 API 或資料庫。
+    </p>
+  {% endif %}
+  <section class="field-block" aria-label="案件資訊" data-invoice-header="true">
+    <p class="field-block__value">發票 ID：<span data-header="invoice-id">{{ view.header.invoice_id }}</span></p>
+    <p class="field-block__value">
+      案件狀態：{% set tone = STATUS_TONE.get(view.header.status.code, "unknown") if view.header.status.known else "unknown" %}<span class="idt-badge idt-badge--{{ tone }}" data-status-tone="{{ tone }}" data-header="status" data-status-known="{{ 'true' if view.header.status.known else 'false' }}">{{ view.header.status.label }}</span>
+      {% if view.header.status.code and view.header.status.known %}<code>{{ view.header.status.code }}</code>{% endif %}
+    </p>
+    <p class="field-block__value">提交輪次：<span data-header="round">{{ view.header.submission_round }}</span></p>
+  </section>
+  {% if not view.has_ai_snapshot %}
+    <p class="form-hint" data-original-notice="no-snapshot">沒有 AI 原始快照，無法比對原值（不代表未修改）。</p>
+  {% endif %}
+  <p class="form-hint">檢核規則版本：{{ view.rule_version }}　檢核時間：{{ view.checked_at }}</p>
+  <section class="validation-summary" aria-label="檢核摘要">
+    <span class="validation-summary__item validation-summary__item--error">錯誤 {{ view.validation.error_count }}</span>
+    <span class="validation-summary__item validation-summary__item--warning">警告 {{ view.validation.warning_count }}</span>
+    <span class="validation-summary__item validation-summary__item--unknown" data-unknown-count="{{ view.validation.unknown_count }}">未知等級 {{ view.validation.unknown_count }}</span>
+    {% if view.validation.has_warning %}<span class="issue__notice">待人工確認</span>{% endif %}
+  </section>
+  {% if view.validation.unknown_count %}
+    <p class="form-hint" data-unknown-notice="true">有 {{ view.validation.unknown_count }} 筆檢核訊息的嚴重度未知，請逐筆確認，不代表檢核通過。</p>
+  {% endif %}
+  {% if view.validation.general_issues %}
+    <section class="field-block field-block--general" aria-label="其他檢核訊息">
+      <h2 class="field-block__label">其他檢核訊息</h2>
+      {{ issue_list(view.validation.general_issues) }}
+    </section>
+  {% endif %}
+  {% for section in view.sections %}
+    {% if section.kind == "items" %}
+      <section class="field-block" data-field-group="items" aria-label="明細">
+        <h2 class="field-block__label">明細</h2>
+        <div class="invoice-detail__table-wrap" role="region" aria-label="明細表（可橫向捲動）" tabindex="0">
+        <table class="table">
+          <thead>
+            <tr>
+              {% for column in section.columns %}
+                <th scope="col" data-field-id="{{ column.field.field_id }}">{{ column.field.label }}</th>
+              {% endfor %}
+              <th scope="col">AI 原值比對</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+              <tr data-line-no="{{ loop.index }}">
+                {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+                {% set original = section.row_originals[loop.index0] if section.row_originals else none %}
+                <td data-original-status="{{ original.status if original else 'no_snapshot' }}">
+                  {% if original and original.status != "no_snapshot" %}
+                    {{ ORIGINAL_LABEL.get(original.status, original.status) }}
+                    {% if original.note %}<small>（{{ original.note }}）</small>{% endif %}
+                  {% else %}-{% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="{{ section.columns | length + 1 }}" class="empty-state">沒有明細資料</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        {# 明細列的檢核訊息：放在表格捲動容器之外（窄螢幕才能完整換行），依列分組，每筆只顯示一次 #}
+        {% if section.row_issues | select | list %}
+          <div class="invoice-detail__row-issues" data-row-issues="true">
+            {% for row_issue_list in section.row_issues %}
+              {% if row_issue_list %}
+                {% set item_name = section.rows[loop.index0][0] if section.rows[loop.index0] else "-" %}
+                <section class="row-issues" data-line-no="{{ loop.index }}" aria-label="第 {{ loop.index }} 筆明細的檢核訊息">
+                  <h3 class="row-issues__title">第 {{ loop.index }} 筆明細{% if item_name != "-" %}（{{ item_name }}）{% endif %}</h3>
+                  {{ issue_list(row_issue_list) }}
+                </section>
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if section.row_count_mismatch %}
+          <p class="form-hint" data-row-count-mismatch="true">明細筆數與 AI 原始值不同，逐列比對僅供參考。</p>
+        {% elif section.row_compare_limited %}
+          <p class="form-hint" data-row-compare-limited="true">明細逐列依位置比對，沒有列識別資訊，無法確認是否調整過順序，僅供參考。</p>
+        {% endif %}
+        {% if section.removed_original_rows %}
+          <p class="form-hint" data-removed-rows="{{ section.removed_original_rows }}">AI 原始快照有 {{ section.removed_original_rows }} 列明細在目前資料中不存在。</p>
+        {% endif %}
+        {% if section.overall_issues %}
+          <div class="field-block__issues" data-field-id="items">
+            <strong>明細整體</strong>
+            {{ issue_list(section.overall_issues) }}
+          </div>
+        {% endif %}
+        {% for column in section.columns %}
+          {% if column.issues %}
+            <div class="field-block__issues"
+                 data-field-id="{{ column.field.field_id }}">
+              <strong>{{ column.field.label }}</strong>
+              {{ issue_list(column.issues) }}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+    {% else %}
+      <section class="field-block {% if section.issues %}field-block--has-issue{% endif %}"
+               data-field-id="{{ section.field.field_id }}">
+        <h2 class="field-block__label">{{ section.field.order }}. {{ section.field.label }}</h2>
+        {% for part in section.parts %}
+          <p class="field-block__value">
+            {% if part.label %}<span class="field-block__part">{{ part.label }}：</span>{% endif %}
+            {{ part.value }}
+            {% if part.original %}<span class="field-block__original">（AI 原值：{{ part.original }}）</span>{% endif %}
+            {% if part.status != "no_snapshot" %}<small class="field-block__original-status" data-original-status="{{ part.status }}">{{ ORIGINAL_LABEL.get(part.status, part.status) }}</small>{% endif %}
+          </p>
+        {% endfor %}
+        {{ issue_list(section.issues) }}
+      </section>
+    {% endif %}
+  {% endfor %}
+  <div class="submit-area">
+    {% if is_demo %}
+    {# 離線展示頁：不呈現提交按鈕，提示不受檢核結果影響 #}
+    <p class="form-hint" data-demo-submit-note="true">展示頁不提供提交（離線展示，沒有任何送出行為）。</p>
+    {% else %}
+    {# 僅畫面狀態：沒有 form／action，不送出任何請求 #}
+    <button type="button"
+            class="btn btn--primary"
+            id="submit-control"
+            {% if not view.submit_control_enabled %}disabled aria-disabled="true"{% endif %}>提交</button>
+    {% if not view.submit_control_enabled %}
+      <p class="form-hint">仍有錯誤，修正後才能提交。</p>
+    {% else %}
+      <p class="form-hint">提交功能尚未接線（僅畫面狀態）。</p>
+    {% endif %}
+    {% endif %}
+  </div>
+</div>
 {% endblock content %}
