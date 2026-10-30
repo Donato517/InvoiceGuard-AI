@@ -1,7 +1,7 @@
 """
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/check-required、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
     （詳情為確認畫面骨架：只讀取與呈現，尚無修改／重新檢核／提交路由）
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
@@ -14,7 +14,7 @@ import re
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -205,6 +205,14 @@ async def check_duplicate_invoice(
 ) -> dict[str, Any]:
     """查重：經 API 確認字軌＋號碼＋賣方統編是否已存在。"""
     return await invoices_client.check_duplicate(token, **payload.model_dump())
+
+
+@router.post("/check-required", dependencies=[Depends(verify_same_origin)], response_model=None)
+async def check_required_fields(
+    token: AccessToken, payload: Annotated[dict[str, Any], Body()]
+) -> dict[str, Any]:
+    """必填檢核：把核對頁目前的欄位值轉給 API，一次取得所有必填缺漏（不寫入資料）；規則全部由 API 決定。"""
+    return await invoices_client.check_required_fields(token, payload)
 
 
 @router.post("/mobile-upload", dependencies=[Depends(verify_same_origin)], response_model=None)
