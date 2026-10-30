@@ -1,7 +1,7 @@
 """
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/check-required、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/check-required、POST /invoices/check-warnings、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
     （詳情為確認畫面骨架：只讀取與呈現，尚無修改／重新檢核／提交路由）
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
@@ -213,6 +213,14 @@ async def check_required_fields(
 ) -> dict[str, Any]:
     """必填檢核：把核對頁目前的欄位值轉給 API，一次取得所有必填缺漏（不寫入資料）；規則全部由 API 決定。"""
     return await invoices_client.check_required_fields(token, payload)
+
+
+@router.post("/check-warnings", dependencies=[Depends(verify_same_origin)], response_model=None)
+async def check_invoice_warnings(
+    token: AccessToken, payload: Annotated[dict[str, Any], Body()]
+) -> dict[str, Any]:
+    """業務警示預覽：把核對頁目前的欄位值轉給 API，取得未來日期與金額不一致警示（不寫入資料、不阻擋送出）。"""
+    return await invoices_client.check_invoice_warnings(token, payload)
 
 
 @router.post("/mobile-upload", dependencies=[Depends(verify_same_origin)], response_model=None)

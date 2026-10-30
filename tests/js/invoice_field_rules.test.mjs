@@ -520,3 +520,82 @@ test('placeMissing：重複的缺漏不會讓總數虛增', () => {
   const plan = Rules.placeMissing([miss('tax_type'), miss('tax_type')], [], LABELS, [], () => false)
   assert.equal(plan.total, 1)
 })
+
+// ======== 業務警示（發票日期晚於今天、金額不一致）========
+const warn = (code, field, message = 'api-message') => ({ field, code, message })
+const okResult = (warnings) => ({ ok: true, data: { warnings, checked_on: '2026-10-30' } })
+
+test('業務警示：解讀回應只保留已知的業務警示代碼，其餘（如統編檢查碼）不顯示在這裡', () => {
+  const parsed = Rules.parseWarningResult(okResult([
+    warn('invoice_date_future', 'invoice_date'),
+    warn('total_amount_mismatch', 'total_amount'),
+    warn('tax_id_checksum', 'seller_tax_id'),
+    warn('tax_amount_mismatch', 'tax_amount'),
+    warn('items_total_mismatch', 'items')
+  ]))
+  assert.equal(parsed.kind, 'ok')
+  assert.deepEqual(parsed.warnings.map((w) => w.code), ['invoice_date_future', 'total_amount_mismatch', 'tax_amount_mismatch', 'items_total_mismatch'])
+  assert.deepEqual(Rules.parseWarningResult(okResult([])), { kind: 'ok', warnings: [] })
+})
+
+test('業務警示：任何無法確認的回應都是失敗，不能當成「沒有警示」', () => {
+  const bad = [
+    null, undefined, { ok: false, data: okResult([]).data }, { ok: true, data: null }, { ok: true, data: [] },
+    { ok: true, data: {} }, { ok: true, data: { warnings: 'x' } }, { ok: true, data: { warnings: [null] } },
+    { ok: true, data: { warnings: [{ field: 'a' }] } }, { ok: true, data: { warnings: [{ field: 1, code: 'x', message: 'y' }] } },
+    { ok: false, data: { error: { code: 'INTERNAL_ERROR' } } }
+  ]
+  for (const result of bad) {
+    assert.deepEqual(Rules.parseWarningResult(result), { kind: 'error', warnings: [] }, JSON.stringify(result))
+  }
+})
+
+test('業務警示：掛載位置——明細合計在明細區，其餘為同名表頭欄位', () => {
+  assert.equal(Rules.warningKey(warn('items_total_mismatch', 'items')), Rules.ITEMS_KEY)
+  assert.equal(Rules.warningKey(warn('invoice_date_future', 'invoice_date')), 'h:invoice_date')
+  assert.equal(Rules.warningKey(warn('total_amount_mismatch', 'total_amount')), 'h:total_amount')
+})
+
+test('業務警示：驗收情境 6000 + 300 對 9999 的差額文字', () => {
+  const values = { sales_amount: '6000', tax_amount: '300', total_amount: '9999' }
+  assert.equal(Rules.differenceText(values), '銷售額 6,000 ＋ 營業稅額 300 ＝ 6,300；輸入總計 9,999，差額 3,699 元。')
+  assert.equal(
+    Rules.warningText(warn('total_amount_mismatch', 'total_amount'), values),
+    '總計與銷售額及營業稅額不一致，請核對。銷售額 6,000 ＋ 營業稅額 300 ＝ 6,300；輸入總計 9,999，差額 3,699 元。'
+  )
+})
+
+test('業務警示：差額文字處理小數、總計較小與超大金額，只做加減不套稅率', () => {
+  assert.equal(Rules.differenceText({ sales_amount: '100.5', tax_amount: '5.25', total_amount: '100' }),
+    '銷售額 100.5 ＋ 營業稅額 5.25 ＝ 105.75；輸入總計 100，差額 5.75 元。')
+  assert.equal(Rules.differenceText({ sales_amount: '9999999999999999', tax_amount: '1', total_amount: '0' }),
+    '銷售額 9,999,999,999,999,999 ＋ 營業稅額 1 ＝ 10,000,000,000,000,000；輸入總計 0，差額 10,000,000,000,000,000 元。')
+})
+
+test('業務警示：任一金額無法解讀時不顯示算式，只顯示一般文案（不做誤導性結論）', () => {
+  for (const bad of ['', 'abc', '１２', '1.234', '-1', undefined, null]) {
+    const values = { sales_amount: '6000', tax_amount: bad, total_amount: '9999' }
+    assert.equal(Rules.differenceText(values), '', String(bad))
+  }
+  assert.equal(Rules.warningText(warn('total_amount_mismatch', 'total_amount'), {}), '總計與銷售額及營業稅額不一致，請核對。')
+})
+
+test('業務警示：未來日期使用核定文案；其他警示沿用 API 訊息', () => {
+  assert.equal(Rules.warningText(warn('invoice_date_future', 'invoice_date', 'x'), {}), '發票日期晚於今天，請核對原始發票。')
+  assert.equal(Rules.warningText(warn('items_total_mismatch', 'items', '明細金額合計與銷售額不符，請確認'), {}), '明細金額合計與銷售額不符，請確認')
+  assert.match(Rules.WARNING_NOTE, /不代表已被拒絕提交/)
+})
+
+test('流程：proceed 為非同步時，忙碌鎖要等它完成才解除（避免取警示期間重複點擊）', async () => {
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const ctx = makeCtx({ proceed: async () => { ctx.log.push('proceed:start'); await gate; ctx.log.push('proceed:end') } })
+  const first = Rules.runConfirm(ctx)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(ctx.state.busy, true)
+  assert.deepEqual(await Rules.runConfirm(ctx), { status: 'busy' })
+  release()
+  assert.deepEqual(await first, { status: 'complete' })
+  assert.equal(ctx.state.busy, false)
+  assert.deepEqual(ctx.log.slice(-3), ['proceed:start', 'proceed:end', 'busy:false'])
+})

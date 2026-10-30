@@ -3,7 +3,8 @@
  * 功能說明：上傳核對頁的欄位規則（純函式，不碰 DOM、不呼叫 API）——
  *   1. 送出前既有的資料整理（字軌／號碼、金額與統編），由 mobile-camera.js 的 buildPayload() 與格式提示共用；
  *   2. 欄位格式提示的判斷（格式正確／格式相容／格式錯誤／尚未填寫／無明確規則）；
- *   3. 必填缺漏（API POST /invoices/check-required）對應到畫面欄位，以及「上傳者確認」的檢核流程。
+ *   3. 必填缺漏（API POST /invoices/check-required）對應到畫面欄位，以及「上傳者確認」的檢核流程；
+ *   4. 業務警示（API POST /invoices/check-warnings：發票日期晚於今天、金額不一致）的解讀與顯示文字。
  * 注意事項：
  *   - 格式規則須與 API InvoiceSubmitRequest 相同（字軌 ^[A-Z]{2}$、號碼與統編 ^[0-9]{8}$、金額最多 16 位整數＋2 位小數、
  *     數量與單價最多 14 位整數＋4 位小數）；tests/unit/test_required_fields_contract.py 在兩站同目錄時比對。
@@ -309,6 +310,97 @@
     return failure; // 回應自相矛盾：不放行
   }
 
+  // ---- 業務警示（規則全部在 API；這裡只負責解讀回應與組出顯示文字，不判斷日期或金額是否有問題）----
+  var BUSINESS_WARNING_CODES = [
+    'invoice_date_future',
+    'total_amount_mismatch',
+    'tax_amount_mismatch',
+    'items_total_mismatch',
+  ];
+  // 業務警示預覽無法完成時的說明；不影響送出，正式送出時 API 仍會重新計算
+  var WARNING_FAILURE_MESSAGE =
+    '目前無法更新業務警示，請自行核對發票日期與金額。這不影響送出，送出時系統仍會重新檢核。';
+  var WARNING_NOTE = '這是人工核對提醒，不代表已被拒絕提交。';
+
+  /**
+   * 解讀業務警示預覽 API 的結果；無法確認的結果一律視為失敗，不可當成「沒有警示」。
+   * @param {{ok: boolean, data: *}} result 呼叫結果。
+   * @returns {{kind: string, warnings: Array}} kind：ok 或 error；ok 只保留已知的業務警示代碼。
+   */
+  function parseWarningResult(result) {
+    var failure = { kind: 'error', warnings: [] };
+    var data = result && result.data;
+    if (!result || !result.ok || !data || typeof data !== 'object' || !Array.isArray(data.warnings)) return failure;
+    var valid = data.warnings.every(function (entry) {
+      return (
+        entry &&
+        typeof entry === 'object' &&
+        typeof entry.field === 'string' &&
+        typeof entry.code === 'string' &&
+        typeof entry.message === 'string'
+      );
+    });
+    if (!valid) return failure;
+    return {
+      kind: 'ok',
+      warnings: data.warnings.filter(function (entry) {
+        return BUSINESS_WARNING_CODES.indexOf(entry.code) !== -1;
+      }),
+    };
+  }
+
+  /** 業務警示要掛在哪個畫面欄位：明細合計掛在明細區，其餘掛在同名表頭欄位。 */
+  function warningKey(warning) {
+    return warning.field === 'items' ? ITEMS_KEY : headerKey(warning.field);
+  }
+
+  // 金額字串（已整理成半形、最多 2 位小數）→ 以「分」計的整數；格式不符回傳 null
+  function toCents(value) {
+    var text = String(value === undefined || value === null ? '' : value);
+    if (!AMOUNT_RE.test(text)) return null;
+    var parts = text.split('.');
+    return BigInt(parts[0]) * 100n + BigInt(((parts[1] || '') + '00').slice(0, 2));
+  }
+
+  function formatCents(cents) {
+    var whole = (cents / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    var fraction = (cents % 100n).toString().padStart(2, '0').replace(/0+$/, '');
+    return fraction ? whole + '.' + fraction : whole;
+  }
+
+  /**
+   * 總計不一致時的差額說明；只用畫面上已有的三個數字做加減，不套用任何稅率或容差。
+   * @param {{sales_amount: string, tax_amount: string, total_amount: string}} values 整理後的金額字串。
+   * @returns {string} 三個金額都可解讀才有內容，否則為空字串（不顯示不確定的算式）。
+   */
+  function differenceText(values) {
+    var sales = toCents(values.sales_amount);
+    var tax = toCents(values.tax_amount);
+    var total = toCents(values.total_amount);
+    if (sales === null || tax === null || total === null) return '';
+    var expected = sales + tax;
+    var diff = total > expected ? total - expected : expected - total;
+    return (
+      '銷售額 ' + formatCents(sales) + ' ＋ 營業稅額 ' + formatCents(tax) + ' ＝ ' + formatCents(expected) +
+      '；輸入總計 ' + formatCents(total) + '，差額 ' + formatCents(diff) + ' 元。'
+    );
+  }
+
+  /**
+   * 業務警示的顯示文字。總計不一致與未來日期使用核定文案，其餘沿用 API 的中文訊息。
+   * @param {{code: string, message: string}} warning API 警示。
+   * @param {Object} values 目前整理後的送出值（用來算差額）。
+   * @returns {string}
+   */
+  function warningText(warning, values) {
+    if (warning.code === 'invoice_date_future') return '發票日期晚於今天，請核對原始發票。';
+    if (warning.code === 'total_amount_mismatch') {
+      var detail = differenceText(values || {});
+      return '總計與銷售額及營業稅額不一致，請核對。' + (detail ? detail : '');
+    }
+    return warning.message;
+  }
+
   /**
    * 「上傳者確認」的檢核流程（依賴由呼叫端注入，方便離線測試）。
    * 順序：確認已勾選「我已核對」→ 鎖定避免重複點擊 → 收集欄位 → 呼叫必填檢核 API →
@@ -346,7 +438,7 @@
         return { status: 'missing' };
       }
       ctx.clearMissing();
-      ctx.proceed();
+      await ctx.proceed(); // proceed 可為非同步（取業務警示）；忙碌鎖在完成前不解除，避免重複點擊
       return { status: 'complete' };
     } finally {
       ctx.setBusy(false);
@@ -370,6 +462,13 @@
     itemKey: itemKey,
     ITEMS_KEY: ITEMS_KEY,
     CHECK_FAILURE_MESSAGE: CHECK_FAILURE_MESSAGE,
+    BUSINESS_WARNING_CODES: BUSINESS_WARNING_CODES,
+    WARNING_FAILURE_MESSAGE: WARNING_FAILURE_MESSAGE,
+    WARNING_NOTE: WARNING_NOTE,
+    parseWarningResult: parseWarningResult,
+    warningKey: warningKey,
+    differenceText: differenceText,
+    warningText: warningText,
     planMissing: planMissing,
     placeMissing: placeMissing,
     buildCheckRequest: buildCheckRequest,

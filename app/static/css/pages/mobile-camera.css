@@ -695,3 +695,25 @@
 #btn-check-duplicate {
   margin-top: 10px;
 }
+
+/* 業務警示（發票日期晚於今天、金額不一致）：黃色人工核對提醒，與 AI 辨識警示、必填錯誤分開 */
+.field-business-warning {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--color-warning, #d97706);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-warning-soft, #fef3c7);
+  font-size: 0.8125rem;
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.business-warnings {
+  border-color: var(--color-warning, #d97706);
+  background: var(--color-warning-soft, #fef3c7);
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.business-warnings[hidden] {
+  display: none;
+}

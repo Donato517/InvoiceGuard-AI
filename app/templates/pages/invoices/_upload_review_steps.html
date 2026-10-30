@@ -113,6 +113,12 @@
       <ul id="modified-list" class="recognition-warnings" hidden>
       </ul>
     </div>
+    {# 業務警示（發票日期晚於今天、金額不一致）：只是人工核對提醒，不阻擋查重與送出；由 mobile-camera.js 填入 #}
+    <div id="business-warnings" class="alert business-warnings" role="note" hidden>
+      <p id="business-warnings-title"></p>
+      <ul id="business-warnings-list" class="recognition-warnings" hidden>
+      </ul>
+    </div>
     <button type="button" id="btn-check-duplicate" class="btn btn--primary">系統檢查發票是否重複</button>
     <div id="dup-alert-box" class="duplicate-alert" hidden></div>
     <div id="final-submit-group" hidden>

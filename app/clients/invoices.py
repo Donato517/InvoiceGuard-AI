@@ -75,6 +75,31 @@ async def check_required_fields(token: str, payload: dict[str, Any]) -> dict[str
     return result
 
 
+async def check_invoice_warnings(token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """業務警示預覽（POST /invoices/check-warnings）：未來日期與金額不一致；只是提醒，不寫入任何資料。
+
+    Args:
+        token: 使用者的 access token。
+        payload: 核對頁目前的欄位值（欄位同 POST /invoices，可缺漏或格式錯誤）。
+
+    Returns:
+        {"warnings": [{"field", "code", "message"}], "checked_on": "YYYY-MM-DD"}；警示不阻擋送出。
+
+    Raises:
+        ApiError: API 錯誤（401、4xx、5xx）、連線失敗（503），或 API 回 2xx 但本文不是合法 JSON／沒有本文時
+            為 502 INVALID_UPSTREAM_RESPONSE（不含原始本文）。
+    """
+    try:
+        result = await request_json("POST", "/invoices/check-warnings", token=token, json=payload)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("業務警示預覽的 API 回應不是合法 JSON（%s）", exc.__class__.__name__)
+        raise _invalid_upstream_response() from exc
+    if result is None:
+        logger.warning("業務警示預覽的 API 回應沒有本文")
+        raise _invalid_upstream_response()
+    return result
+
+
 def _invalid_upstream_response() -> ApiError:
     """API 回 2xx 但內容無法使用；不帶原始本文，由全域處理器轉成 502 JSON。"""
     return ApiError(502, "INVALID_UPSTREAM_RESPONSE", INVALID_UPSTREAM_RESPONSE_MESSAGE)

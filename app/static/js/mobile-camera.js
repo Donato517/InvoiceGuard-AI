@@ -1443,16 +1443,109 @@
     };
   }
 
-  // 必填欄位完整後，才進行原有的格式檢查，通過就進入查重與確認送出
-  function continueAfterRequired() {
+  // ---- 業務警示（發票日期晚於今天、金額不一致）：只是人工核對提醒，不阻擋查重與送出 ----
+  // 規則全部在 API（POST /invoices/check-warnings 與正式送出共用同一組）；這裡只負責顯示。
+  // 使用者修改相關欄位後，舊警示立即清除，warningEpoch 讓「檢查期間又被修改」的過期結果不被當成最新。
+  let warningEpoch = 0;
+
+  function clearBusinessWarnings() {
+    document.querySelectorAll('.field-business-warning').forEach((node) => node.remove());
+    const box = $('#business-warnings');
+    if (box) box.hidden = true;
+  }
+
+  function invalidateBusinessWarnings() {
+    warningEpoch += 1;
+    clearBusinessWarnings();
+  }
+
+  // 瀏覽器會在輸入框被隱藏（例如切到確認頁）時補送 change 事件；那次事件沒有新的修改，
+  // 不能清掉剛顯示的警示。所以記住各欄位最近一次處理的值，change 只在值真的不同時才使警示失效。
+  const watchedValues = new WeakMap();
+
+  function onWatchedEdit(event) {
+    const target = event.target;
+    if (event.type === 'click') {
+      if (target && target.closest && target.closest('button')) invalidateBusinessWarnings();
+      return;
+    }
+    if (!target || typeof target.value !== 'string') return;
+    if (event.type === 'change' && watchedValues.get(target) === target.value) return;
+    watchedValues.set(target, target.value);
+    invalidateBusinessWarnings();
+  }
+
+  function watchBusinessWarningEdits() {
+    const root = $('#fields-container');
+    if (!root || root.dataset.warningWatch) return;
+    root.dataset.warningWatch = '1';
+    ['input', 'change', 'click'].forEach((type) => root.addEventListener(type, onWatchedEdit));
+  }
+
+  function renderBusinessWarnings(outcome, payload) {
+    clearBusinessWarnings();
+    const box = $('#business-warnings');
+    const list = $('#business-warnings-list');
+    if (!box || !list) return;
+    list.textContent = '';
+    if (outcome.kind === 'error') {
+      setText('#business-warnings-title', Rules.WARNING_FAILURE_MESSAGE);
+      list.hidden = true;
+      box.hidden = false;
+      return;
+    }
+    if (!outcome.warnings.length) return;
+    outcome.warnings.forEach((w) => {
+      const text = Rules.warningText(w, payload);
+      const target = missingElement(Rules.warningKey(w));
+      const host = target && (target.closest('.field-group') || target);
+      if (host) host.append(make('small', { class: 'field-business-warning', role: 'note' }, text));
+      list.append(make('li', {}, text));
+    });
+    setText(
+      '#business-warnings-title',
+      '有 ' + outcome.warnings.length + ' 項需要人工核對。' + Rules.WARNING_NOTE + '可返回修改，或確認無誤後繼續。'
+    );
+    list.hidden = false;
+    box.hidden = false;
+  }
+
+  // 取最新業務警示；任何失敗都回報 error（不當成「沒有警示」），也不阻擋流程
+  async function fetchBusinessWarnings(payload) {
+    try {
+      const result = await postJson('/invoices/check-warnings', payload);
+      if (result === null) return { kind: 'redirected', warnings: [] };
+      return Rules.parseWarningResult(result);
+    } catch {
+      return { kind: 'error', warnings: [] };
+    }
+  }
+
+  // 必填欄位完整後，才進行原有的格式檢查；通過後取最新業務警示，再進入查重與確認送出
+  async function continueAfterRequired() {
     const built = buildPayload();
-    if (built.error) return notify(built.error);
+    if (built.error) {
+      clearBusinessWarnings();
+      return notify(built.error);
+    }
+    watchBusinessWarningEdits();
+    const epoch = warningEpoch;
+    const outcome = await fetchBusinessWarnings(built.payload);
+    if (outcome.kind === 'redirected') return;
+    if (epoch !== warningEpoch) {
+      return notify('檢查期間欄位又被修改，請再按一次「上傳者確認」。');
+    }
     currentPayload = built.payload;
     setText('#sum-invoice-no', invoiceNoOf(currentPayload));
     setText('#sum-seller-tax-id', currentPayload.seller_tax_id);
     setText('#sum-sales-amount', currentPayload.sales_amount);
     setText('#sum-total-amount', currentPayload.total_amount);
     renderModifiedSummary(currentPayload);
+    // 以顯示警示當下的欄位值為基準：之後瀏覽器補送、值沒變的 change 不算修改
+    ['#fields-container [data-field]', '#fields-container [data-item-field]'].forEach((selector) => {
+      document.querySelectorAll(selector).forEach((control) => watchedValues.set(control, control.value));
+    });
+    renderBusinessWarnings(outcome, currentPayload);
     resetDuplicateState();
     showStep('step-confirm');
   }
@@ -1783,6 +1876,7 @@
         currentPayload = null;
         editLog = [];
         committed = new Map();
+        invalidateBusinessWarnings();
         showStep('step-upload');
       };
     }
