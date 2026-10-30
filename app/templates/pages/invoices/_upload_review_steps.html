@@ -62,6 +62,8 @@
       <ul id="recognition-warnings" class="recognition-warnings" hidden>
       </ul>
     </div>
+    {# 按「上傳者確認」後由 mobile-camera.js 填入「尚缺 N 個必填欄位」；初次載入保持隱藏 #}
+    <div id="required-summary" class="required-summary" role="alert" hidden></div>
     <div id="fields-container">
       {# 欄位由 JS 依 API 辨識結果產生 #}
     </div>
@@ -109,6 +111,12 @@
     <div id="modified-summary" class="alert">
       <p id="modified-title"></p>
       <ul id="modified-list" class="recognition-warnings" hidden>
+      </ul>
+    </div>
+    {# 業務警示（發票日期晚於今天、金額不一致）：只是人工核對提醒，不阻擋查重與送出；由 mobile-camera.js 填入 #}
+    <div id="business-warnings" class="alert business-warnings" role="note" hidden>
+      <p id="business-warnings-title"></p>
+      <ul id="business-warnings-list" class="recognition-warnings" hidden>
       </ul>
     </div>
     <button type="button" id="btn-check-duplicate" class="btn btn--primary">系統檢查發票是否重複</button>

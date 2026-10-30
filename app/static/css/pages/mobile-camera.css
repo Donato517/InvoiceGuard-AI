@@ -418,6 +418,99 @@
 .field-group.is-modified > label::after {
   content: "　已修改";
   color: var(--color-primary, #2563eb);
+  white-space: nowrap; /* 窄欄時整組換行，不從「已修改」中間斷開 */
+}
+
+/* 必填標示：紅色「*必填」，星號與文字緊密排列 */
+.field-required {
+  margin-left: 0.25em;
+  color: var(--color-danger, #dc2626);
+  font-weight: 600;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/* 欄位格式提示（離開欄位後）：綠＝格式正確、藍＝格式相容、紅＝格式錯誤；顏色之外一律有圖示與文字 */
+.field-hint {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.field-hint[hidden] {
+  display: none;
+}
+
+.field-hint__icon {
+  display: inline-block;
+  min-width: 1.25em;
+  margin-right: 0.25em;
+  font-weight: 700;
+}
+
+.field-hint--ok {
+  color: var(--color-success-soft-text, #166534);
+}
+
+.field-hint--ok .field-hint__icon {
+  color: var(--color-success, #16a34a);
+}
+
+.field-hint--compatible {
+  color: var(--color-primary-hover, #1d4ed8);
+}
+
+.field-hint--error {
+  color: var(--color-danger-soft-text, #991b1b);
+}
+
+.field-hint--error .field-hint__icon {
+  color: var(--color-danger, #dc2626);
+}
+
+/* 按「上傳者確認」後的必填缺漏：淺紅底、紅字提示與頂端摘要 */
+.required-summary {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-danger, #dc2626);
+  border-radius: var(--radius-sm, 4px);
+  background: #fef2f2;
+  color: var(--color-danger-soft-text, #991b1b);
+  font-size: 0.875rem;
+}
+
+.required-summary[hidden] {
+  display: none;
+}
+
+.required-summary--notice {
+  border-color: var(--color-warning, #d97706);
+  background: var(--color-warning-soft, #fef3c7);
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.required-summary ul {
+  margin: 6px 0 0;
+  padding-left: 1.25rem;
+}
+
+.field-missing {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-danger-soft-text, #991b1b);
+}
+
+.field-group input.is-missing,
+.field-group select.is-missing,
+.item-row input.is-missing {
+  border-color: var(--color-danger, #dc2626);
+  background: #fef2f2;
+}
+
+.items-section.is-missing > .items-section__label {
+  color: var(--color-danger-soft-text, #991b1b);
 }
 
 /* 字軌與號碼並排 */
@@ -425,6 +518,13 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 8px;
+}
+
+/* 手機寬度：字軌欄放得下「字軌 *必填 已修改」；兩欄等寬，號碼 8 碼仍放得下 */
+@media (max-width: 480px) {
+  .field-pair {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
 }
 
 .field-note {
@@ -464,6 +564,17 @@
   border: 1px solid var(--color-border, #cbd5e1);
   border-radius: var(--radius-sm, 4px);
   font-size: 0.9375rem;
+}
+
+.item-row__cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.item-row__cell--item_name,
+.item-row__caption--wide {
+  grid-column: 1 / -1;
 }
 
 .item-row__title,
@@ -583,4 +694,26 @@
 
 #btn-check-duplicate {
   margin-top: 10px;
+}
+
+/* 業務警示（發票日期晚於今天、金額不一致）：黃色人工核對提醒，與 AI 辨識警示、必填錯誤分開 */
+.field-business-warning {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-left: 3px solid var(--color-warning, #d97706);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-warning-soft, #fef3c7);
+  font-size: 0.8125rem;
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.business-warnings {
+  border-color: var(--color-warning, #d97706);
+  background: var(--color-warning-soft, #fef3c7);
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.business-warnings[hidden] {
+  display: none;
 }
