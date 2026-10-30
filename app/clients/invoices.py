@@ -1,14 +1,20 @@
 """
 模組名稱：app.clients.invoices
-功能說明：發票相關 API——手機上傳流程（辨識、查重、送出）、列表、詳情、上傳、重新分析。
+功能說明：發票相關 API——手機上傳流程（辨識、必填檢核、查重、送出）、列表、詳情、上傳、重新分析。
     對應 API 路徑：/api/v1/invoices
 注意事項：
     - 手機上傳流程已由 API 實作；列表、詳情、上傳與重新分析的 API 端點仍為 TODO。
 """
 
+import json
+import logging
 from typing import Any
 
-from app.clients.base import request_json
+from app.clients.base import ApiError, request_json
+
+logger = logging.getLogger(__name__)
+
+INVALID_UPSTREAM_RESPONSE_MESSAGE = "服務回應異常，請稍後再試"
 
 
 async def recognize_invoice(
@@ -41,6 +47,37 @@ async def check_duplicate(
         "seller_tax_id": seller_tax_id,
     }
     return await request_json("POST", "/invoices/check-duplicate", token=token, json=payload)
+
+
+async def check_required_fields(token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """必填欄位檢核（POST /invoices/check-required）：一次列出正式提交的所有必填缺漏，不寫入任何資料。
+
+    Args:
+        token: 使用者的 access token。
+        payload: 核對頁目前的欄位值（欄位同 POST /invoices，可缺漏或空白）。
+
+    Returns:
+        {"required_complete": bool, "missing": [{"field", "code", "message", "line_no"}]}；
+        required_complete 只代表沒有必填缺漏，不代表格式或金額正確，也不代表可以提交。
+
+    Raises:
+        ApiError: API 錯誤（401、4xx、5xx）、連線失敗（503），或 API 回 2xx 但本文不是合法 JSON／沒有本文時
+            為 502 INVALID_UPSTREAM_RESPONSE（不含原始本文）；由全域處理器統一轉成 502 JSON。
+    """
+    try:
+        result = await request_json("POST", "/invoices/check-required", token=token, json=payload)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("必填檢核的 API 回應不是合法 JSON（%s）", exc.__class__.__name__)
+        raise _invalid_upstream_response() from exc
+    if result is None:  # 2xx 但沒有本文：此端點一定回傳檢核結果物件
+        logger.warning("必填檢核的 API 回應沒有本文")
+        raise _invalid_upstream_response()
+    return result
+
+
+def _invalid_upstream_response() -> ApiError:
+    """API 回 2xx 但內容無法使用；不帶原始本文，由全域處理器轉成 502 JSON。"""
+    return ApiError(502, "INVALID_UPSTREAM_RESPONSE", INVALID_UPSTREAM_RESPONSE_MESSAGE)
 
 
 async def submit_invoice(token: str, payload: dict[str, Any]) -> dict[str, Any]:

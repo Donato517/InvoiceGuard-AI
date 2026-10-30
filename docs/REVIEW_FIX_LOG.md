@@ -416,3 +416,14 @@
 - 問題 2（表格數字被拆行）：容器的 `overflow-wrap: anywhere` 套用到表格格子，使 250 在窄欄顯示成 25／0。處理：表格格子改回 `overflow-wrap: normal`。
 - 證據（本機）：新增結構測試（以 HTML 解析器檢查：卡片在 `</table>` 之後且在捲動容器外、無 `<tr class="row-issues">`、`data-line-no` 與列序號一致、警示只出現一次、整體警示不移入列卡片、無列警示不輸出容器）及樣式範圍測試（CSS 全部以 `.invoice-detail` 開頭、無 `!important`）。pytest 697 passed、54 skipped；JS 16 passed；Ruff、djLint、check_project 通過。瀏覽器實測（內建瀏覽器，免登入本機展示頁）：375px 無水平溢出、明細表可在容器內橫向捲動、警示卡片完整可讀、以約 100 字元長代碼測試可換行且頁面寬度不變；1280px 無重複警示。
 - 未處理／待辦：前台共用頁首導覽在 375px 換行（跨組，交 A 組或組長）；全站色票與斷點未對齊原型；平板寬度與真實手機未實測；正式詳情 GET API 仍未接通；金額／日期／字軌標準化與 API `_canonical_value` 待對齊；明細依位置比對，無列識別資訊。
+
+## 2026-10-30 Claude：C 組必填檢核——API 回 2xx 但本文非有效 JSON（B2，前台）
+
+- 範圍：分支 `feature/c-required-fields-hints`（HEAD `b4e2dd9`，尚未 Commit）的未提交工作；不屬於 PR #6，下列測試數字不沿用 PR #6 的結果。只改 `app/clients/invoices.py`、`tests/unit/test_required_check_proxy.py`、`docs/DEVELOPMENT_STATUS.md`；`app/clients/base.py`、API、ADMIN 未動。
+- 問題：POST /invoices/check-required 若 API 回 2xx 但本文不是有效 JSON（HTML、不合法 JSON、非 UTF-8），`request_json` 的 `response.json()` 例外沒有被處理，落到全域處理器，前台回 500 `INTERNAL_ERROR`；2xx 且沒有本文時 `request_json` 回 `None`，前台回 200 加 `null`。兩者都不會被當成通過（前端 `parseCheckResult` 一律拒絕），但狀態碼與其他 API 失敗（一律 502）不一致。
+- 原因：`request_json` 只處理錯誤狀態的非 JSON 本文（`_to_api_error`），2xx 路徑直接解析。
+- 修改：只在 `check_required_fields` 處理：精確捕捉 `json.JSONDecodeError`、`UnicodeDecodeError`，並把 `None`（2xx 無本文）視為異常，一律轉成 `ApiError(502, "INVALID_UPSTREAM_RESPONSE", "服務回應異常，請稍後再試")`，由既有處理器回 502 JSON。其他 10 個使用 `request_json` 的呼叫遇到同樣情況仍是 500，這是刻意的範圍限制，統一處理需改 `base.py` 並評估登入與提交。
+- 安全性：訊息固定，不含 API 原始本文、Token 或 Session；日誌只記例外型別或「沒有本文」，不記本文。測試斷言回應不含原始 HTML。
+- 不變的行為：正常 JSON 原樣轉出；合法 JSON 但結構異常（`{}`、`[]` 等）仍原樣轉出，由前端拒絕；401 導向登入、4xx 原樣、5xx（含非 JSON 錯誤本文）、連線失敗與逾時（502 `NETWORK_ERROR`）皆有測試確認不變。
+- 驗證（本機，不連任何服務，以不寫入專案的方式執行）：`test_required_check_proxy.py` 31 passed（修改前該檔 14 個、新增 17 個，使用 `httpx.MockTransport` 走真實 `request_json`）；前台全站 pytest 743 passed、54 skipped（全部略過皆在 `test_project_governance.py`，數量與修改前相同）；JS 55 passed；Ruff check／format --check 通過；`scripts/check_project.py` PASS；scratchpad 外部重放 18 passed（不在專案內）。
+- 未驗項目：真實 DB、真實 Session 與登入、瀏覽器畫面、手機 UI、部署環境；API 的 `check-required` 分支尚未提交合併，未與合併後的 API 一起實測。字軌提示與提交整理規則的差異（ß、ı、ſ、ﬁ）維持記錄為後續改善，本次未處理。
