@@ -54,15 +54,20 @@ def test_confirm_button_checks_required_through_the_proxy_before_original_checks
     assert proceed.index("= buildPayload()") < proceed.index("showStep('step-confirm')")
 
 
-def test_format_hints_are_not_driven_by_keystrokes_or_api_calls() -> None:
+def test_format_hints_update_live_on_input_without_api_calls() -> None:
+    # UX-01（2026-10-31）：格式提示改為輸入時即時更新（原為只在 blur）；仍不呼叫 API，blur 保留作為補強
     feedback = JS[JS.index("function attachFeedback") : JS.index("function headerField")]
     assert "addEventListener('blur'" in feedback
     assert "fetch(" not in feedback
     assert "postJson" not in feedback
-    # input 事件只收起舊提示與清除已補齊的缺漏，不顯示新提示
-    input_handler = feedback[feedback.index("addEventListener('input'") :]
-    input_handler = input_handler[: input_handler.index("});")]
-    assert "showHint" not in input_handler
+    on_input = feedback[
+        feedback.index("const onInput") : feedback.index("control.addEventListener('input'")
+    ]
+    assert "refresh()" in on_input
+    assert "control.addEventListener('input', onInput)" in feedback
+    refresh = feedback[feedback.index("const refresh") : feedback.index("const clearIfFilled")]
+    assert "showHint" in refresh
+    assert "markValidity" in refresh
 
 
 def test_required_mark_is_a_red_tight_star_required_label() -> None:

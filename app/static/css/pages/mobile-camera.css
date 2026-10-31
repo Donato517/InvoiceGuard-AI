@@ -469,6 +469,28 @@
   color: var(--color-danger, #dc2626);
 }
 
+/* 輸入時即時檢核：紅框＝格式錯誤、綠框＝格式正確；順序放在「已修改」之後，邊框顏色以對錯為準，
+   「已修改」仍由標籤文字、底色與下方說明呈現，聚焦（藍色外框）不會蓋掉紅色錯誤 */
+.field-group input.is-valid,
+.field-group select.is-valid,
+.item-row input.is-valid {
+  border-color: var(--color-success, #16a34a);
+}
+
+.field-group input.is-invalid,
+.field-group select.is-invalid,
+.item-row input.is-invalid {
+  border-color: var(--color-danger, #dc2626);
+  background: #fef2f2;
+}
+
+.field-group input.is-invalid:focus,
+.field-group select.is-invalid:focus,
+.item-row input.is-invalid:focus {
+  outline: 2px solid var(--color-danger, #dc2626);
+  outline-offset: 1px;
+}
+
 /* 按「上傳者確認」後的必填缺漏：淺紅底、紅字提示與頂端摘要 */
 .required-summary {
   margin: 0 0 12px;
@@ -697,7 +719,8 @@
 }
 
 /* 業務警示（發票日期晚於今天、金額不一致）：黃色人工核對提醒，與 AI 辨識警示、必填錯誤分開 */
-.field-business-warning {
+.field-business-warning,
+.field-date-live-warning {
   display: block;
   margin-top: 4px;
   padding: 4px 8px;
