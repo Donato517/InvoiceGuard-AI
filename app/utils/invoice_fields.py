@@ -1,6 +1,6 @@
 """
 模組名稱：app.utils.invoice_fields
-功能說明：發票確認畫面的 14 類業務欄位 UI metadata，以及僅供前台畫面與測試使用的暫定 fixture key。
+功能說明：發票確認畫面的 14 類業務欄位 UI metadata、僅供前台畫面與測試使用的暫定 fixture key，以及 API 詳情修改紀錄的欄位名稱對照。
 注意事項：
     - UiField.field_id（F01～F14）只是前台畫面的識別碼，不是 AI／API／validation 的正式 key。
     - 下方 FIXTURE_* 常數是 frontend-only 的暫定對照，用來讀取 mock 資料；
@@ -74,6 +74,13 @@ FIXTURE_VALUE_KEYS: dict[str, tuple[tuple[str | None, str], ...]] = {
     "F14": ((None, "seller_name"),),
 }
 
+# 只供詳情頁顯示的附加子項：UI field_id → ((子項標籤, 資料 key), ...)。
+# 不併入 FIXTURE_VALUE_KEYS：field_changes 以後者決定 AI 快照必須具備哪些 key（快照比對的契約），
+# 賣方統編（API 詳情有、AI 快照契約未列）只在來源真的有此 key 時才附加顯示。
+DETAIL_EXTRA_VALUE_KEYS: dict[str, tuple[tuple[str, str], ...]] = {
+    "F14": (("統編", "seller_tax_id"),),
+}
+
 # 明細欄位：UI field_id → 每筆明細 dict 內的 mock 資料 key
 FIXTURE_ITEM_KEYS: dict[str, str] = {
     "F06": "item_name",
@@ -109,4 +116,32 @@ FIXTURE_ISSUE_FIELD_TO_UI: dict[str, str] = {
     "total_amount_zh": "F12",
     "remark": "F13",
     "seller_name": "F14",
+}
+
+# ---- API 修改紀錄（GET 詳情的 modified_fields）的欄位名稱對照 ----
+
+# 表頭欄位名稱 → (UI field_id, 備註標籤)；F11／F12 的標籤與上方 FIXTURE_VALUE_KEYS 的子項相同，
+# 其餘欄位的標籤只用於修改備註（單值欄位為 None）。
+# invoice_track／invoice_number 在畫面合併顯示為 F02，修改備註以「字軌」「號碼」分別標示。
+MODIFIED_HEADER_FIELD_TO_UI: dict[str, tuple[str, str | None]] = {
+    "invoice_track": ("F02", "字軌"),
+    "invoice_number": ("F02", "號碼"),
+    "invoice_date": ("F03", None),
+    "buyer_name": ("F04", None),
+    "buyer_tax_id": ("F05", None),
+    "sales_amount": ("F10", None),
+    "tax_type": ("F11", "課稅別"),
+    "tax_amount": ("F11", "稅額"),
+    "total_amount": ("F12", "總計"),
+    "total_amount_zh": ("F12", "國字大寫"),
+    "seller_name": ("F14", "名稱"),
+    "seller_tax_id": ("F14", "統編"),
+}
+
+# 明細欄位名稱 → UI field_id（API 的 line_amount 在畫面是「金額」F09）
+MODIFIED_ITEM_FIELD_TO_UI: dict[str, str] = {
+    "item_name": "F06",
+    "quantity": "F07",
+    "unit_price": "F08",
+    "line_amount": "F09",
 }
