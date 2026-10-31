@@ -11,6 +11,10 @@
     - 檢核資料可為 fixture 的 validation，或 API 的 validation_results（{"warnings": [...]}），
       先經 validation_adapter 轉接；issue 有明細序號（line_no）時掛在對應明細列，
       只有 field="items" 或序號對不到任何一列時顯示在明細整體區域，不猜測是哪一列。
+    - API 詳情（經 invoice_detail_adapter）沒有 AI 原始快照，只有「被改過的欄位」紀錄（輸入的 modifications）：
+      不走 original_values 比對（has_ai_snapshot 維持 False），改由 modifications 產生欄位備註、明細列備註、
+      已刪除的 AI 明細與其他修改紀錄；明細備註只依真實 line_no 唯一對應，對不到或有重複時列入「無法對應」，
+      不退回位置猜測。沒有紀錄的欄位不輸出任何狀態標籤，不代表未修改。
 """
 
 from collections.abc import Mapping
@@ -19,6 +23,7 @@ from typing import Any
 
 from app.utils.field_changes import compare_to_original
 from app.utils.invoice_fields import (
+    DETAIL_EXTRA_VALUE_KEYS,
     FIXTURE_ISSUE_FIELD_TO_UI,
     FIXTURE_ITEM_KEYS,
     FIXTURE_ITEMS_KEY,
@@ -26,6 +31,8 @@ from app.utils.invoice_fields import (
     FIXTURE_VALIDATION_KEY,
     FIXTURE_VALUE_KEYS,
     ITEMS_OVERALL_ID,
+    MODIFIED_HEADER_FIELD_TO_UI,
+    MODIFIED_ITEM_FIELD_TO_UI,
     UI_FIELDS,
     UiField,
 )
@@ -55,6 +62,54 @@ class ItemRowOriginal:
 
 
 @dataclass(frozen=True)
+class ModificationNote:
+    """一筆 AI 原值備註（來自 API 的 modified_fields 紀錄）；original 已是安全的純文字。"""
+
+    label: str | None
+    original: str
+
+
+@dataclass(frozen=True)
+class DeletedAiItem:
+    """送出時被刪除的 AI 明細；ai_line_no 是 AI 辨識順序，與目前明細的序號無關。"""
+
+    ai_line_no: int
+    cells: tuple[tuple[str, str], ...]
+    omitted_extra: bool = False
+
+
+@dataclass(frozen=True)
+class UnmatchedItemNote:
+    """對不到唯一一列明細的修改紀錄；不掛在任何一列。"""
+
+    line_no: int
+    label: str
+    original: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class OtherModification:
+    """無法歸入已知欄位的修改紀錄，原樣（純文字）顯示，不丟棄。"""
+
+    scope: str | None
+    name: str | None
+    line_no: int | None
+    original: str
+    submitted: str | None
+
+
+@dataclass(frozen=True)
+class ModificationsView:
+    """API 修改紀錄的畫面資料；total 是紀錄總數（只涵蓋本輪有修改紀錄的欄位，不是完整 AI 快照）。"""
+
+    total: int
+    deleted_items: tuple[DeletedAiItem, ...] = ()
+    unmatched_items: tuple[UnmatchedItemNote, ...] = ()
+    other: tuple[OtherModification, ...] = ()
+
+
+@dataclass(frozen=True)
 class InvoiceHeaderView:
     """詳情頁表頭：UUID、簽核狀態、提交輪次（唯讀；來源沒給就顯示「-」，不推算）。"""
 
@@ -70,6 +125,7 @@ class FieldSection:
     field: UiField
     parts: tuple[FieldPart, ...]
     issues: tuple[IssueView, ...]
+    modifications: tuple[ModificationNote, ...] = ()
     kind: str = "field"
 
 
@@ -98,6 +154,9 @@ class ItemsSection:
     removed_original_rows: int = 0
     row_count_mismatch: bool = False
     row_compare_limited: bool = False
+    row_line_nos: tuple[int | None, ...] = ()
+    row_modifications: tuple[tuple[ModificationNote, ...], ...] = ()
+    modification_mode: bool = False
     kind: str = "items"
 
 
@@ -111,6 +170,7 @@ class ConfirmationView:
     rule_version: str
     header: InvoiceHeaderView = InvoiceHeaderView()
     has_ai_snapshot: bool = False
+    modifications: ModificationsView | None = None
 
     @property
     def submit_control_enabled(self) -> bool:
@@ -133,6 +193,10 @@ def _field_parts(
         comparison = compare_to_original(originals, key, value)
         shown_original = _text(comparison.original) if comparison.status == "modified" else None
         parts.append(FieldPart(label, _text(value), shown_original, comparison.status))
+    # 只供詳情顯示的附加子項（例如賣方統編）：來源真的有此 key 才顯示，不參與 AI 原值比對
+    for label, key in DETAIL_EXTRA_VALUE_KEYS.get(field_id, ()):
+        if key in invoice:
+            parts.append(FieldPart(label, _text(invoice.get(key)), None))
     return tuple(parts)
 
 
@@ -213,6 +277,120 @@ def _row_originals(
     return tuple(results), max(0, len(original_rows) - len(current_rows)), mismatch
 
 
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _row_line_nos(invoice: Mapping[str, Any]) -> tuple[int | None, ...]:
+    """每一列明細自己的真實 line_no（與 _items_rows 相同的過濾規則，所以與列一一對應）。"""
+    return tuple(
+        item.get("line_no") if _is_int(item.get("line_no")) else None
+        for item in _item_mappings(invoice)
+    )
+
+
+def _entries(group: Any) -> list[Any]:
+    return list(group) if isinstance(group, list | tuple) else []
+
+
+def _build_modifications(
+    raw: Any, row_line_nos: tuple[int | None, ...]
+) -> tuple[
+    ModificationsView | None,
+    dict[str, tuple[ModificationNote, ...]],
+    tuple[tuple[ModificationNote, ...], ...],
+]:
+    """把轉接後的修改紀錄分配到欄位、明細列與獨立區塊；每一筆都有去處，不靜默丟棄。
+
+    Returns:
+        (ModificationsView 或 None（輸入沒有 modifications，例如 fixture）, UI field_id → 欄位備註,
+        各明細列的備註（與列一一對應）)。明細紀錄只在恰有一列擁有該 line_no 時才掛上去。
+    """
+    if not isinstance(raw, Mapping):
+        return None, {}, ()
+    labels = {f.field_id: f.label for f in UI_FIELDS}
+    field_notes: dict[str, list[ModificationNote]] = {}
+    row_notes: list[list[ModificationNote]] = [[] for _ in row_line_nos]
+    unmatched: list[UnmatchedItemNote] = []
+    other: list[OtherModification] = []
+    deleted: list[DeletedAiItem] = []
+
+    def _other_from(entry: Any) -> None:
+        if isinstance(entry, Mapping):
+            line_no = entry.get("line_no")
+            other.append(
+                OtherModification(
+                    scope=entry.get("scope") if isinstance(entry.get("scope"), str) else None,
+                    name=entry.get("name") if isinstance(entry.get("name"), str) else None,
+                    line_no=line_no if _is_int(line_no) else None,
+                    original=_text(entry.get("original")),
+                    submitted=entry.get("submitted")
+                    if isinstance(entry.get("submitted"), str)
+                    else None,
+                )
+            )
+        else:
+            other.append(OtherModification(None, None, None, "（無法解析的紀錄）", None))
+
+    for entry in _entries(raw.get("header")):
+        name = entry.get("name") if isinstance(entry, Mapping) else None
+        target = MODIFIED_HEADER_FIELD_TO_UI.get(name) if isinstance(name, str) else None
+        if target is None:
+            _other_from(entry)
+            continue
+        field_id, label = target
+        field_notes.setdefault(field_id, []).append(
+            ModificationNote(label, _text(entry.get("original")))
+        )
+
+    for entry in _entries(raw.get("items")):
+        name = entry.get("name") if isinstance(entry, Mapping) else None
+        line_no = entry.get("line_no") if isinstance(entry, Mapping) else None
+        field_id = MODIFIED_ITEM_FIELD_TO_UI.get(name) if isinstance(name, str) else None
+        if field_id is None or not _is_int(line_no):
+            _other_from(entry)
+            continue
+        label, original = labels[field_id], _text(entry.get("original"))
+        rows = [i for i, number in enumerate(row_line_nos) if number == line_no]
+        if len(rows) == 1:
+            row_notes[rows[0]].append(ModificationNote(label, original))
+        else:
+            reason = "目前明細中找不到這個序號" if not rows else "有多筆明細使用同一個序號"
+            unmatched.append(UnmatchedItemNote(line_no, label, original, reason))
+
+    for entry in _entries(raw.get("deleted")):
+        ai_line_no = entry.get("ai_line_no") if isinstance(entry, Mapping) else None
+        if not _is_int(ai_line_no):
+            _other_from(entry)
+            continue
+        cells = tuple(
+            (labels[MODIFIED_ITEM_FIELD_TO_UI[name]], _text(text))
+            for name, text in (
+                c
+                for c in _entries(entry.get("cells"))
+                if isinstance(c, list | tuple) and len(c) == 2
+            )
+            if name in MODIFIED_ITEM_FIELD_TO_UI
+        )
+        deleted.append(DeletedAiItem(ai_line_no, cells, bool(entry.get("omitted_extra"))))
+
+    for entry in _entries(raw.get("other")):
+        _other_from(entry)
+
+    total = raw.get("total")
+    view = ModificationsView(
+        total=total if _is_int(total) else 0,
+        deleted_items=tuple(deleted),
+        unmatched_items=tuple(unmatched),
+        other=tuple(other),
+    )
+    return (
+        view,
+        {key: tuple(value) for key, value in field_notes.items()},
+        tuple(tuple(value) for value in row_notes),
+    )
+
+
 def _locate_item_issues(
     validation: ValidationView, item_field_ids: list[str], row_count: int
 ) -> tuple[dict[str, tuple[IssueView, ...]], tuple[tuple[IssueView, ...], ...]]:
@@ -255,6 +433,10 @@ def build_confirmation_view(invoice: Mapping[str, Any]) -> ConfirmationView:
     rows = _items_rows(invoice, item_field_ids)
     remaining, row_issues = _locate_item_issues(validation, item_field_ids, len(rows))
     row_originals, removed_rows, count_mismatch = _row_originals(invoice, originals, item_field_ids)
+    row_line_nos = _row_line_nos(invoice)
+    modifications, field_notes, row_notes = _build_modifications(
+        invoice.get("modifications"), row_line_nos
+    )
     sections: list[FieldSection | ItemsSection] = []
     items_placed = False
     for field in UI_FIELDS:
@@ -274,6 +456,9 @@ def build_confirmation_view(invoice: Mapping[str, Any]) -> ConfirmationView:
                     row_compare_limited=bool(row_originals)
                     and row_originals[0].status
                     not in ("no_snapshot", "field_missing", "original_null", "not_comparable"),
+                    row_line_nos=row_line_nos,
+                    row_modifications=row_notes,
+                    modification_mode=modifications is not None,
                 )
             )
         else:
@@ -282,6 +467,7 @@ def build_confirmation_view(invoice: Mapping[str, Any]) -> ConfirmationView:
                     field=field,
                     parts=_field_parts(field.field_id, invoice, originals),
                     issues=validation.issues_by_field.get(field.field_id, ()),
+                    modifications=field_notes.get(field.field_id, ()),
                 )
             )
     return ConfirmationView(
@@ -295,4 +481,5 @@ def build_confirmation_view(invoice: Mapping[str, Any]) -> ConfirmationView:
             submission_round=round_label(invoice.get("submission_round")),
         ),
         has_ai_snapshot=originals is not None,
+        modifications=modifications,
     )

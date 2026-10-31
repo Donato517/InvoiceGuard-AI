@@ -1,8 +1,8 @@
 """
 模組名稱：app.routers.invoices
 功能說明：我的發票——列表、上傳、手機拍照上傳、詳情、與發票作業前台流程（步驟 1～3：上傳、AI OCR 辨識、核對修正）。
-路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/check-required、POST /invoices/check-warnings、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}、GET /invoices/{invoice_id}/flow
-    （詳情為確認畫面骨架：只讀取與呈現，尚無修改／重新檢核／提交路由）
+路由：GET /invoices、GET /invoices/upload、GET /invoices/mobile-upload、POST /invoices/mobile-recognize、POST /invoices/check-duplicate、POST /invoices/check-required、POST /invoices/check-warnings、POST /invoices/mobile-upload、GET /invoices/demo/detail（僅本機虛構展示）、GET /invoices/{invoice_id}（UUID）、GET /invoices/{invoice_id}/flow（舊示範流程，ID 為整數）
+    （詳情唯讀：讀取 API GET /invoices/{id} 並呈現，沒有修改／重新檢核／提交路由）
 注意事項：
     - 列表頁為「router → clients → 樣板」的完整參考寫法。
     - 手機上傳的辨識、查重、送出由頁面 JS 以 fetch（Accept: application/json）呼叫，本站轉呼叫 API 並回 JSON；
@@ -10,7 +10,6 @@
     - 發票流程 1～3 步驟由前台採購端執行，後續步驟 4～9 轉由後台審核。
 """
 
-import re
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -19,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.clients import invoices as invoices_client
+from app.clients.base import ApiError
 from app.constants import INVOICE_FLOW_STEPS, INVOICE_STATUS_LABEL
 from app.core.config import settings
 from app.core.deps import AccessToken
@@ -27,6 +27,7 @@ from app.core.templating import templates
 from app.routers.auth import require_session
 from app.utils.demo_invoice import DEMO_INVOICE_ID, build_demo_invoice
 from app.utils.invoice_confirmation import build_confirmation_view
+from app.utils.invoice_detail_adapter import InvoiceDetailFormatError, adapt_invoice_detail
 
 # 全部發票頁面需登入：每次經 API 核對 Session
 router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(require_session)])
@@ -229,15 +230,11 @@ async def mobile_upload_submit(payload: MobileUploadRequest, token: AccessToken)
     return await invoices_client.submit_invoice(token, payload.model_dump())
 
 
-# 舊骨架的正整數 ID：1～18 位 ASCII 數字、不為 0（全形數字不符合）
-_LEGACY_ID_PATTERN = re.compile(r"(?=[0-9]*[1-9])[0-9]{1,18}")
-
-
 def _normalize_detail_id(invoice_id: str) -> str:
-    """詳情 ID：接受 UUID（正式）或正整數（舊骨架）；其他一律 404，不把任意字串轉給 API。"""
-    # 長度先限制再轉 int：超長數字字串會觸發 Python 的位數上限（ValueError → 500），也不該轉給 API
-    if _LEGACY_ID_PATTERN.fullmatch(invoice_id):
-        return str(int(invoice_id))
+    """詳情 ID：只接受 UUID（API 只收 UUID）；其他一律 404，不把任意字串轉給 API。
+
+    舊骨架的正整數 ID 不再接受（`/{invoice_id}/flow` 是另一組路由，仍用整數）。
+    """
     try:
         return str(UUID(invoice_id))
     except ValueError:
@@ -265,10 +262,19 @@ async def invoice_detail_demo(request: Request) -> HTMLResponse:
 
 @router.get("/{invoice_id}", response_class=HTMLResponse)
 async def invoice_detail(request: Request, token: AccessToken, invoice_id: str) -> HTMLResponse:
-    """發票確認畫面：14 類業務欄位、明細、案件狀態與提交輪次、規則檢核結果與 AI 原值差異（僅呈現）。"""
-    # 待整合：API 尚未提供 GET /invoices/{id}，欄位 key 也是 C 組暫定 fixture key（見 invoice_fields.py）
+    """發票詳情（唯讀）：經 API 讀取提交者本人已送出的發票，呈現 14 類業務欄位、明細、AI 修改紀錄與檢核提醒。
+
+    API 失敗或回應不合法時一律由全域處理器回錯誤頁，不回退展示資料。
+    """
     normalized_id = _normalize_detail_id(invoice_id)
-    invoice = await invoices_client.fetch_invoice(token, normalized_id)
+    raw = await invoices_client.fetch_invoice(token, normalized_id)
+    try:
+        invoice = adapt_invoice_detail(raw)
+    except InvoiceDetailFormatError:
+        # client 已檢查形狀；這裡是最後防線，避免把不可能是發票的資料顯示成空案件
+        raise ApiError(
+            502, "INVALID_UPSTREAM_RESPONSE", invoices_client.INVALID_UPSTREAM_RESPONSE_MESSAGE
+        ) from None
     return templates.TemplateResponse(
         request,
         "pages/invoices/detail.html",
