@@ -419,7 +419,7 @@
 
 ## 2026-10-30 Claude：C 組必填檢核——API 回 2xx 但本文非有效 JSON（B2，前台）
 
-- 範圍：分支 `feature/c-required-fields-hints`（HEAD `b4e2dd9`，尚未 Commit）的未提交工作；不屬於 PR #6，下列測試數字不沿用 PR #6 的結果。只改 `app/clients/invoices.py`、`tests/unit/test_required_check_proxy.py`、`docs/DEVELOPMENT_STATUS.md`；`app/clients/base.py`、API、ADMIN 未動。
+- 範圍：分支 `feature/c-required-fields-hints`（當時 HEAD `b4e2dd9`，這些是當時的未提交工作；內容之後已由 PR #7 合併進 origin/main，commit `384f0cd`，依本機追蹤資訊）；不屬於 PR #6，下列測試數字不沿用 PR #6 的結果。只改 `app/clients/invoices.py`、`tests/unit/test_required_check_proxy.py`、`docs/DEVELOPMENT_STATUS.md`；`app/clients/base.py`、API、ADMIN 未動。
 - 問題：POST /invoices/check-required 若 API 回 2xx 但本文不是有效 JSON（HTML、不合法 JSON、非 UTF-8），`request_json` 的 `response.json()` 例外沒有被處理，落到全域處理器，前台回 500 `INTERNAL_ERROR`；2xx 且沒有本文時 `request_json` 回 `None`，前台回 200 加 `null`。兩者都不會被當成通過（前端 `parseCheckResult` 一律拒絕），但狀態碼與其他 API 失敗（一律 502）不一致。
 - 原因：`request_json` 只處理錯誤狀態的非 JSON 本文（`_to_api_error`），2xx 路徑直接解析。
 - 修改：只在 `check_required_fields` 處理：精確捕捉 `json.JSONDecodeError`、`UnicodeDecodeError`，並把 `None`（2xx 無本文）視為異常，一律轉成 `ApiError(502, "INVALID_UPSTREAM_RESPONSE", "服務回應異常，請稍後再試")`，由既有處理器回 502 JSON。其他 10 個使用 `request_json` 的呼叫遇到同樣情況仍是 500，這是刻意的範圍限制，統一處理需改 `base.py` 並評估登入與提交。
@@ -427,3 +427,17 @@
 - 不變的行為：正常 JSON 原樣轉出；合法 JSON 但結構異常（`{}`、`[]` 等）仍原樣轉出，由前端拒絕；401 導向登入、4xx 原樣、5xx（含非 JSON 錯誤本文）、連線失敗與逾時（502 `NETWORK_ERROR`）皆有測試確認不變。
 - 驗證（本機，不連任何服務，以不寫入專案的方式執行）：`test_required_check_proxy.py` 31 passed（修改前該檔 14 個、新增 17 個，使用 `httpx.MockTransport` 走真實 `request_json`）；前台全站 pytest 743 passed、54 skipped（全部略過皆在 `test_project_governance.py`，數量與修改前相同）；JS 55 passed；Ruff check／format --check 通過；`scripts/check_project.py` PASS；scratchpad 外部重放 18 passed（不在專案內）。
 - 未驗項目：真實 DB、真實 Session 與登入、瀏覽器畫面、手機 UI、部署環境；API 的 `check-required` 分支尚未提交合併，未與合併後的 API 一起實測。字軌提示與提交整理規則的差異（ß、ı、ſ、ﬁ）維持記錄為後續改善，本次未處理。
+
+## 2026-10-31 Claude：C 組 Stage 2——前台詳情頁接後端 GET /invoices/{id}（前台）
+
+- 範圍：分支 `feature/c-invoice-detail-get-stage2`（基準 `origin/main` 384f0cd；已在本機提交為三筆 Commit：936682b、3ba80b1 與本記錄所在的文件提交；尚未 Push、尚未開 PR、尚未 Merge）。只改前台：`app/clients/invoices.py`（`fetch_invoice`）、新增 `app/utils/invoice_detail_adapter.py`、`app/utils/invoice_fields.py`、`app/utils/invoice_confirmation.py`、`app/routers/invoices.py`、`detail.html`、`invoice-detail.css` 與測試、文件；未改後端、ADMIN、Schema、`app/clients/base.py`、`field_changes.py`、`validation_adapter.py`、`validation_view.py`。
+- 問題 1：`fetch_invoice` 沒有回應驗證，2xx 但非 JSON／空本文／非物件會變成 500，型別或巢狀形狀異常會被 builder 當成空案件顯示。處理：在 client 層檢查 JSON、型別、巢狀形狀、`submission_round` 排除 boolean、回傳的 `invoice_id` 必須等於請求的 UUID，不符一律 502 `INVALID_UPSTREAM_RESPONSE`（日誌只記原因代碼）。
+- 問題 2：前台詳情讀取的是 C 組暫定 fixture key（`track_number`、`amount`、中文課稅別、`original_values`），與後端 Stage 1 欄位不同。處理：新增 Adapter 轉換；不輸出 `original_values`（後端沒有 AI 快照）。
+- 問題 3：後端 `modified_fields` 的值是標準值，與欄位值格式不同（`"1000"` 對 `"1000.00"`），沿用 `compare_to_original` 會產生假差異。處理：不比較，狀態由紀錄本身決定；沒有紀錄不顯示任何狀態。
+- 缺陷（本輪自己踩到並修正）：原計畫把賣方統編併入 `FIXTURE_VALUE_KEYS["F14"]`，造成 `test_field_changes.py` 113 個測試失敗——`field_changes._SNAPSHOT_KEYS` 由該表決定 AI 快照必須具備的 key。處理：還原，改用只供詳情顯示的 `DETAIL_EXTRA_VALUE_KEYS`。
+- 行為變更（使用者核定方向）：正式詳情頁唯讀，移除沒有作用的提交按鈕（Demo 不變）；詳情路由只接受 UUID，舊整數 ID 回 404（`/flow` 不受影響）。
+- 反轉或移除的舊斷言（皆因上述需求）：`test_detail_still_accepts_legacy_positive_integer`（舊：`/invoices/7` 回 200）、`test_detail_accepts_largest_legacy_id_and_leading_zeros`（舊：回 200）、`test_real_detail_page_keeps_submit_button`（舊：正式頁有 `id="submit-control"`）、`test_invoice_confirmation.py` 的按鈕 disabled／enabled／`type="button"` 斷言、`status=None` 可渲染（`test_unknown_or_missing_status_is_neutral_dashed` 的 None 參數；改由 client 502 測試與 `status_view` 純函式測試保護）、fixture `original_values` 的 HTML 斷言（改為 modified_fields 版本）。
+- 移到 Demo 路由的測試（只有 4 個，輸入需要 Stage 1 契約沒有的資料）：`test_detail_page_shows_positional_limit_when_counts_equal`（需要 `original_values`）、`test_presentation_one_error_marks_field_on_the_page`、`test_presentation_warning_page_has_notice_and_no_error`（需要 severity）、`test_page_shows_comparison_and_row_location`（需要 issue 的 line_no／expected／actual）。其餘正式路由測試全部改用符合 Stage 1 契約的 Mock 回應，仍走正式路由。
+- 驗證（本機，Mock，不連任何服務）：pytest 978 passed、54 skipped；`node --test tests/js/` 79 pass；Ruff check／format、djLint、check_project（含 `--project-root ..`）、`app.core.environment --check` 通過。破壞性比對（逐一破壞後測試如預期失敗）：client 接受 boolean 為整數、略過 invoice_id 比對、明細備註改依位置、Adapter 靜默丟棄未知紀錄、API 失敗回退 Demo、Adapter 輸出 original_values、正式頁保留提交按鈕。
+- 過程失誤：破壞性比對時兩個備份檔同名，誤以 router 內容覆蓋了 `app/clients/invoices.py`；發現後從 `HEAD` 還原並重新套用同一份修改，再以全套測試確認；之後改用不同檔名的備份重做全部破壞性比對。
+- 未驗項目：真實 API／PostgreSQL（後端 Stage 1 亦未驗證）、真實手機、`submission_round` 大於 1 的 AI 原值基準、warnings 的 severity 政策、原圖（Stage 3）。

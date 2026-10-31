@@ -1,11 +1,16 @@
-"""測試目標：AI 原值分類、詳情頁的 UUID／狀態／提交輪次，以及本機虛構展示頁（合成資料，不連任何服務）"""
+"""測試目標：AI 原值分類、詳情頁的 UUID／狀態／提交輪次，以及本機虛構展示頁（合成資料，不連任何服務）
 
-from copy import deepcopy
+正式詳情路由（/invoices/{uuid}）的測試一律使用符合 Stage 1 契約的 Mock 回應（stage1_detail.build_api_detail），
+不使用 fixture 格式；fixture 專屬輸入（AI 原始快照、issue 的 line_no／expected／actual）只走 Demo 路由或 builder。
+這些是 Mock 測試，不代表與真實 API 整合通過。
+"""
+
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from stage1_detail import API_DETAIL_ID, build_api_detail
 
 from app.clients import invoices as invoices_client
 from app.clients.base import ApiError
@@ -228,9 +233,9 @@ def fetch_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     async def fake_fetch(token: str, invoice_id: str) -> dict[str, Any]:
         calls.append(invoice_id)
-        invoice = deepcopy(build_demo_invoice())
-        invoice["invoice_id"] = invoice_id
-        return invoice
+        return build_api_detail(
+            invoice_id=invoice_id, status="returned_to_applicant", submission_round=2
+        )
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake_fetch)
     return calls
@@ -251,11 +256,15 @@ def test_detail_accepts_uuid_and_shows_status_and_round(
     assert "data-demo-banner" not in html
 
 
-def test_detail_still_accepts_legacy_positive_integer(
+def test_detail_no_longer_accepts_legacy_positive_integer(
     logged_in_client: TestClient, fetch_spy: list[str]
 ) -> None:
-    assert logged_in_client.get("/invoices/7").status_code == 200
-    assert fetch_spy == ["7"]
+    # 反轉舊斷言（舊：回 200 且轉給 API "7"）：後端只收 UUID，舊骨架整數 ID 由前台直接 404、不呼叫 API；
+    # `/{invoice_id}/flow` 是另一組路由，不受影響（見 test_demo_route_does_not_shadow_other_invoice_routes）
+    response = logged_in_client.get("/invoices/7")
+
+    assert response.status_code == 404
+    assert fetch_spy == []
 
 
 @pytest.mark.parametrize(
@@ -274,11 +283,11 @@ def test_detail_unknown_status_does_not_break_page(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def fake_fetch(token: str, invoice_id: str) -> dict[str, Any]:
-        return {"status": "<b>weird</b>", "submission_round": "x", "items": []}
+        return build_api_detail(status="<b>weird</b>")
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake_fetch)
 
-    response = logged_in_client.get("/invoices/7")
+    response = logged_in_client.get(f"/invoices/{API_DETAIL_ID}")
 
     assert response.status_code == 200
     assert "未知狀態（&lt;b&gt;weird&lt;/b&gt;）" in response.text
@@ -290,29 +299,64 @@ def test_detail_without_ai_snapshot_shows_notice_not_unchanged(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def fake_fetch(token: str, invoice_id: str) -> dict[str, Any]:
-        return {"buyer_name": "甲", "items": []}
+        return build_api_detail(buyer_name="甲", items=[])
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake_fetch)
 
-    html = logged_in_client.get("/invoices/7").text
+    html = logged_in_client.get(f"/invoices/{API_DETAIL_ID}").text
 
     assert "沒有 AI 原始快照" in html
     assert "未修改" not in html.replace("不代表未修改", "")
+    assert 'data-original-status="unchanged"' not in html
 
 
+@pytest.mark.parametrize(
+    ("status", "code", "expected"),
+    [
+        (403, "FORBIDDEN", 403),
+        (404, "NOT_FOUND", 404),
+        (422, "VALIDATION_ERROR", 422),
+        (500, "INVOICE_DATA_INVALID", 502),
+        (500, "INTERNAL_ERROR", 502),
+        (502, "INVALID_UPSTREAM_RESPONSE", 502),
+        (503, "SERVICE_UNAVAILABLE", 502),
+        (503, "NETWORK_ERROR", 502),
+    ],
+)
 def test_formal_detail_failure_never_falls_back_to_demo_data(
-    logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    logged_in_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    code: str,
+    expected: int,
 ) -> None:
     async def failing_fetch(token: str, invoice_id: str) -> dict[str, Any]:
-        raise ApiError(404, "NOT_FOUND", "找不到發票")
+        raise ApiError(status, code, "後端訊息")
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", failing_fetch)
 
+    # 用展示頁的假 UUID 當正式案件 ID，確認即使 ID 相同也不會取用展示資料
     response = logged_in_client.get(f"/invoices/{DEMO_INVOICE_ID}")
 
-    assert response.status_code != 200
-    assert "測試資料／非正式案件" not in response.text
-    assert "甲乙示範股份有限公司" not in response.text
+    assert response.status_code == expected
+    assert "後端訊息" in response.text
+    for marker in ("測試資料／非正式案件", "甲乙示範股份有限公司", "影印紙", "示範商行"):
+        assert marker not in response.text
+    assert 'id="submit-control"' not in response.text
+
+
+def test_formal_detail_401_redirects_to_login_without_demo_data(
+    logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unauthorized(token: str, invoice_id: str) -> dict[str, Any]:
+        raise ApiError(401, "UNAUTHORIZED", "請重新登入")
+
+    monkeypatch.setattr(invoices_client, "fetch_invoice", unauthorized)
+
+    response = logged_in_client.get(f"/invoices/{API_DETAIL_ID}")
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login?next=")
 
 
 # ---- 本機虛構展示頁 ----
@@ -389,12 +433,13 @@ def test_detail_rejects_overlong_numeric_ids_with_404_not_500(
     assert fetch_spy == []
 
 
-def test_detail_accepts_largest_legacy_id_and_leading_zeros(
+def test_detail_rejects_largest_legacy_id_and_leading_zeros(
     logged_in_client: TestClient, fetch_spy: list[str]
 ) -> None:
-    assert logged_in_client.get("/invoices/" + "9" * 18).status_code == 200
-    assert logged_in_client.get("/invoices/0007").status_code == 200
-    assert fetch_spy == ["9" * 18, "7"]
+    # 反轉舊斷言（舊：兩者回 200 且轉給 API "999…9"、"7"）：整數分支已移除，只剩 UUID
+    assert logged_in_client.get("/invoices/" + "9" * 18).status_code == 404
+    assert logged_in_client.get("/invoices/0007").status_code == 404
+    assert fetch_spy == []
 
 
 def test_equal_row_count_keeps_modified_but_notes_positional_limit() -> None:
@@ -437,14 +482,17 @@ def test_detail_page_shows_count_mismatch_hint(
 def test_detail_page_shows_positional_limit_when_counts_equal(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    invoice = build_demo_invoice()
-    invoice["items"] = invoice["items"][:2]
+    # 移到 Demo 路由：「依位置比對 AI 原始快照」需要 original_values，Stage 1 的詳情沒有這種資料，
+    # 正式路徑不可能出現；builder／樣板對 fixture 輸入的行為仍由展示頁保護
+    import app.routers.invoices as router_module
 
-    async def fake(token: str, invoice_id: str) -> dict[str, Any]:
+    def two_rows() -> dict[str, Any]:
+        invoice = build_demo_invoice()
+        invoice["items"] = invoice["items"][:2]
         return invoice
 
-    monkeypatch.setattr(invoices_client, "fetch_invoice", fake)
-    html = logged_in_client.get("/invoices/7").text
+    monkeypatch.setattr(router_module, "build_demo_invoice", two_rows)
+    html = logged_in_client.get("/invoices/demo/detail").text
 
     assert "data-row-compare-limited" in html
     assert "無法確認是否調整過順序" in html
@@ -499,14 +547,12 @@ def test_demo_page_shows_unknown_count_and_notice(logged_in_client: TestClient) 
 def test_unknown_notice_hidden_when_no_unknown(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    invoice = build_demo_invoice()
-    invoice["validation"]["issues"] = [{"field": "amount", "severity": "warning", "message": "m"}]
-
+    # 正式路徑：Stage 1 的 warnings 沒有 severity，所以「沒有任何警示」才會是 0 筆未知等級
     async def fake(token: str, invoice_id: str) -> dict[str, Any]:
-        return invoice
+        return build_api_detail(warnings=[])
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake)
-    html = logged_in_client.get("/invoices/7").text
+    html = logged_in_client.get(f"/invoices/{API_DETAIL_ID}").text
 
     assert 'data-unknown-count="0"' in html
     assert "data-unknown-notice" not in html
@@ -542,17 +588,21 @@ def test_demo_note_is_not_affected_by_blocking_error(
     assert "仍有錯誤，修正後才能提交" not in html
 
 
-def test_real_detail_page_keeps_submit_button(
+def test_real_detail_page_is_read_only_without_a_submit_button(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # 反轉舊斷言（舊：正式頁有 id="submit-control"）：正式詳情頁唯讀，沒有無作用的提交按鈕
     async def fake(token: str, invoice_id: str) -> dict[str, Any]:
-        return build_demo_invoice()
+        return build_api_detail(warnings=[{"field": "items", "code": "c", "message": "m"}])
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake)
-    html = logged_in_client.get("/invoices/7").text
+    html = logged_in_client.get(f"/invoices/{API_DETAIL_ID}").text
 
-    assert 'id="submit-control"' in html
-    assert "data-demo-submit-note" not in html
+    assert 'id="submit-control"' not in html
+    assert "<button" not in html.split("<h1>發票詳情")[1].split("</main>")[0]
+    assert "提交功能尚未接線" not in html
+    assert 'data-readonly-note="true"' in html
+    assert "data-demo-submit-note" not in html  # 展示頁的說明只屬於展示頁
 
 
 # ---- 視覺結構（只檢查樣板結構與 class，不驗證實際外觀）----
@@ -573,14 +623,11 @@ _TONES = {
 def _detail_html(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, status: Any = "approved"
 ) -> str:
-    invoice = build_demo_invoice()
-    invoice["status"] = status
-
     async def fake(token: str, invoice_id: str) -> dict[str, Any]:
-        return invoice
+        return build_api_detail(status=status)
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake)
-    return client.get("/invoices/7").text
+    return client.get(f"/invoices/{API_DETAIL_ID}").text
 
 
 def test_detail_loads_page_css_and_scope_container(logged_in_client: TestClient) -> None:
@@ -617,7 +664,9 @@ def test_only_approved_gets_the_success_tone() -> None:
     assert not any(t == "ok" for c, t in _TONES.items() if c.startswith("returned"))
 
 
-@pytest.mark.parametrize("status", ["mystery_status", None, ""])
+# status=None 不再出現在正式路徑：Stage 1 的 status 是字串，None 會被 API Client 以 502 拒絕
+# （見 test_invoice_detail_client.py）；None→「-」的顯示規則由 status_view 的純函式測試保護
+@pytest.mark.parametrize("status", ["mystery_status", ""])
 def test_unknown_or_missing_status_is_neutral_dashed(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch, status: Any
 ) -> None:
@@ -729,16 +778,13 @@ def test_overall_items_issue_is_not_moved_into_a_row_card(logged_in_client: Test
 def test_no_row_issue_container_without_row_issues(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    invoice = build_demo_invoice()
-    invoice["validation"]["issues"] = [
-        {"field": "items", "code": "overall_only", "message": "整體提醒", "severity": "warning"}
-    ]
-
     async def fake(token: str, invoice_id: str) -> dict[str, Any]:
-        return invoice
+        return build_api_detail(
+            warnings=[{"field": "items", "code": "overall_only", "message": "整體提醒"}]
+        )
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake)
-    html = logged_in_client.get("/invoices/7").text
+    html = logged_in_client.get(f"/invoices/{API_DETAIL_ID}").text
 
     assert 'class="invoice-detail__row-issues"' not in html
     assert 'class="row-issues"' not in html
