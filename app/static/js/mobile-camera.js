@@ -125,6 +125,8 @@
   let currentRecognition = null; // API 辨識回應（顯示於 AI 回傳 JSON）
   // 核對中的欄位值；items 每列有 row_id 與 source_line_no（對應 AI 明細序號，新增的明細為 null）
   let currentDraft = null;
+  // 使用者親自改過「國字大寫」後，不再隨總計自動更新（清空後恢復自動）
+  let zhManual = false;
   let currentPayload = null; // 核對完成、準備查重與送出的內容
   let aiItems = {}; // AI 辨識明細：line_no → 明細
   let committed = new Map(); // 各欄位最後一次記入修改紀錄的值
@@ -982,12 +984,50 @@
     return warnings.filter((w) => (WARNING_TARGETS[w.field] || w.field) === key);
   }
 
+  // AI 辨識時提醒的是「AI 的值」；使用者把該欄位改成與 AI 不同的值後，那則提醒就過時了，隱藏並從摘要移除。
+  // 改回 AI 的值則恢復。明細（items）等沒有對應表頭欄位的提醒不受影響。
+  function recognitionWarningDismissed(warning) {
+    const field = WARNING_TARGETS[warning.field] || warning.field;
+    const input = $('#f-' + field);
+    if (!input) return false;
+    return canonicalValue(field, input.value) !== aiHeaderValue(field);
+  }
+
+  function syncRecognitionWarnings() {
+    if (!currentRecognition) return;
+    const warnings = currentRecognition.warnings || [];
+    document.querySelectorAll('#fields-container .field-warning').forEach((node) => {
+      const warning = warnings[Number(node.dataset.warningIndex)];
+      node.hidden = Boolean(warning) && recognitionWarningDismissed(warning);
+    });
+    renderRecognitionWarningList();
+  }
+
+  // 總計變動時，國字大寫跟著更新（只做轉換；是否一致由 API 警示負責）；使用者自己改過國字就不覆蓋
+  function syncDerivedFields(field) {
+    if (field === 'total_amount_zh') {
+      const zhInput = $('#f-total_amount_zh');
+      zhManual = Boolean(zhInput && zhInput.value.trim() !== '');
+      return;
+    }
+    if (field !== 'total_amount' || zhManual) return;
+    const total = $('#f-total_amount');
+    const zhInput = $('#f-total_amount_zh');
+    if (!total || !zhInput) return;
+    const next = Rules.amountToChinese(total.value) || '';
+    if (zhInput.value === next) return;
+    zhInput.value = next;
+    recordEdit('header', null, 'total_amount_zh', next);
+    markHeaderField('total_amount_zh');
+  }
+
   function markHeaderField(field) {
     const input = $('#f-' + field);
     if (!input) return;
     const group = input.closest('.field-group');
     const ai = aiHeaderValue(field);
     const modified = canonicalValue(field, input.value) !== ai;
+    syncRecognitionWarnings();
     group.classList.toggle('is-modified', modified);
     const note = group.querySelector('.field-modified');
     note.hidden = !modified;
@@ -1013,6 +1053,7 @@
       normalizeControl(control, field, event);
       markHeaderField(field);
       if (field === 'invoice_date') updateFutureDateWarning();
+      syncDerivedFields(field);
     };
     control.addEventListener('input', onEdit);
     control.addEventListener('compositionend', onEdit);
@@ -1021,6 +1062,7 @@
       recordEdit('header', null, field, control.value);
       markHeaderField(field);
       if (field === 'invoice_date') updateFutureDateWarning();
+      syncDerivedFields(field);
     });
     return control;
   }
@@ -1141,7 +1183,15 @@
         : null
     );
     group.append(make('small', { class: 'field-modified', hidden: '' }));
-    warningsFor(field).forEach((w) => group.append(make('small', { class: 'field-warning' }, w.message)));
+    warningsFor(field).forEach((w) =>
+      group.append(
+        make(
+          'small',
+          { class: 'field-warning', 'data-warning-index': String(currentRecognition.warnings.indexOf(w)) },
+          w.message
+        )
+      )
+    );
     return group;
   }
 
@@ -1446,8 +1496,8 @@
     box.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
   }
 
-  function renderRecognitionSummary() {
-    const warnings = currentRecognition.warnings || [];
+  function renderRecognitionWarningList() {
+    const warnings = (currentRecognition.warnings || []).filter((w) => !recognitionWarningDismissed(w));
     setText(
       '#recognition-summary',
       (warnings.length ? 'AI 辨識完成，有 ' + warnings.length + ' 項需要核對：' : 'AI 辨識完成，請對照影像逐欄核對。') +
@@ -1459,6 +1509,10 @@
       warnings.forEach((w) => list.append(make('li', {}, w.message)));
       list.hidden = !warnings.length;
     }
+  }
+
+  function renderRecognitionSummary() {
+    renderRecognitionWarningList();
     setText('#ai-json', JSON.stringify(currentRecognition, null, 2));
   }
 
@@ -1535,6 +1589,7 @@
     const container = $('#fields-container');
     if (!container || !currentDraft) return;
     container.textContent = '';
+    zhManual = false;
     const kind =
       currentRecognition.is_triplicate === true
         ? '三聯式統一發票'
@@ -1694,13 +1749,74 @@
   function onWatchedEdit(event) {
     const target = event.target;
     if (event.type === 'click') {
-      if (target && target.closest && target.closest('button')) invalidateBusinessWarnings();
+      if (target && target.closest && target.closest('button')) {
+        invalidateBusinessWarnings();
+        scheduleLiveWarnings(); // 新增／刪除明細會改變明細合計
+      }
       return;
     }
     if (!target || typeof target.value !== 'string') return;
     if (event.type === 'change' && watchedValues.get(target) === target.value) return;
     watchedValues.set(target, target.value);
     invalidateBusinessWarnings();
+    if (affectsBusinessWarnings(target)) scheduleLiveWarnings();
+  }
+
+  // ---- 核對頁即時業務警示：修改日期、課稅別、統編、金額後，稍候以 API 預覽重新取得警示 ----
+  // 規則仍全部在 API（POST /invoices/check-warnings）；這裡只組出目前畫面的值並顯示欄位旁的提醒。
+  // 失敗時不打擾使用者（按「上傳者確認」時仍會重新檢核並說明）。
+  const LIVE_WARNING_DELAY_MS = 500;
+  const LIVE_WARNING_FIELDS = [
+    'invoice_date',
+    'tax_type',
+    'seller_tax_id',
+    'buyer_tax_id',
+    'sales_amount',
+    'tax_amount',
+    'total_amount',
+  ];
+  let liveWarningTimer = null;
+
+  function affectsBusinessWarnings(target) {
+    const field = target.dataset && target.dataset.field;
+    if (field) return LIVE_WARNING_FIELDS.includes(field);
+    return Boolean(target.dataset && target.dataset.itemField === 'line_amount');
+  }
+
+  function liveWarningBody() {
+    const body = { items: [] };
+    document.querySelectorAll('#fields-container [data-field]').forEach((input) => {
+      const field = input.dataset.field;
+      body[field] = AMOUNT_FIELDS.includes(field) || field.endsWith('tax_id') ? cleanNumber(input.value) : input.value.trim();
+    });
+    document.querySelectorAll('#items-container [data-row-id]').forEach((rowEl) => {
+      const values = rowValues(rowEl);
+      if (!Rules.isBlankItem(values)) body.items.push({ line_amount: cleanNumber(values.line_amount) });
+    });
+    return body;
+  }
+
+  function scheduleLiveWarnings() {
+    if (typeof setTimeout !== 'function') return;
+    if (liveWarningTimer !== null) clearTimeout(liveWarningTimer);
+    liveWarningTimer = setTimeout(runLiveWarnings, LIVE_WARNING_DELAY_MS);
+  }
+
+  async function runLiveWarnings() {
+    liveWarningTimer = null;
+    const epoch = warningEpoch;
+    const body = liveWarningBody();
+    const outcome = await fetchBusinessWarnings(body);
+    if (outcome.kind !== 'ok' || epoch !== warningEpoch) return; // 失敗，或等待期間又改了欄位
+    document.querySelectorAll('.field-business-warning').forEach((node) => node.remove());
+    if (outcome.warnings.some((w) => w.code === 'invoice_date_future')) {
+      document.querySelectorAll('.field-date-live-warning').forEach((node) => node.remove());
+    }
+    outcome.warnings.forEach((w) => {
+      const target = missingElement(Rules.warningKey(w));
+      const host = target && (target.closest('.field-group') || target);
+      if (host) host.append(make('small', { class: 'field-business-warning', role: 'note' }, Rules.warningText(w, body)));
+    });
   }
 
   function watchBusinessWarningEdits() {
