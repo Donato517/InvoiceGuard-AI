@@ -1,13 +1,15 @@
 {#
   @template pages/invoices/detail.html
-  @description 發票確認畫面骨架：14 類業務欄位、多筆明細、規則檢核 issue；提交控制只呈現畫面狀態。
-  @route GET /invoices/{invoice_id}（需登入）
-  @context invoice_id: str           發票 ID（正式為 UUID 字串；舊骨架的正整數 ID 也接受）
+  @description 發票確認畫面：14 類業務欄位、多筆明細、規則檢核 issue、AI 修改紀錄；正式頁唯讀。
+  @route GET /invoices/{invoice_id}（需登入；invoice_id 只接受 UUID）、GET /invoices/demo/detail（僅本機虛構展示）
+  @context invoice_id: str           發票 ID（UUID 字串）
   @context is_demo: bool             是否為本機虛構展示資料（顯示「測試資料／非正式案件」橫幅）
   @context view: ConfirmationView    app.utils.invoice_confirmation 組出的畫面資料
             （明細 issue：有 line_no 者顯示在該列下方，field="items" 者顯示在明細整體區域）
-  @note 提交按鈕為 type="button"，沒有 form／action，不會送出任何請求；
-        enabled 只代表目前沒有 error，不代表案件已送審或核准。
+  @note 正式頁與展示頁都沒有提交按鈕：正式頁只顯示唯讀說明（data-readonly-note），展示頁顯示展示說明；
+        view.submit_control_enabled 只是 view model 的畫面條件，樣板不使用它。
+  @note view.modifications 不是 None 表示資料來自 API 詳情：只有「有修改紀錄的欄位」會顯示 AI 原值，
+        沒有紀錄不代表未修改，也不是完整 AI 快照。所有文字由 Jinja 轉義，不使用 safe。
 #}
 {% extends "layouts/default.html" %}
 {% block title %}發票詳情{% endblock %}
@@ -77,6 +79,9 @@
   {% if not view.has_ai_snapshot %}
     <p class="form-hint" data-original-notice="no-snapshot">沒有 AI 原始快照，無法比對原值（不代表未修改）。</p>
   {% endif %}
+  {% if view.modifications is not none %}
+    <p class="form-hint" data-modification-notice="partial">AI 原值只涵蓋本輪有修改紀錄的欄位（共 {{ view.modifications.total }} 筆紀錄）；沒有紀錄的欄位不代表未修改，也不代表已取得完整 AI 原值。</p>
+  {% endif %}
   <p class="form-hint">檢核規則版本：{{ view.rule_version }}　檢核時間：{{ view.checked_at }}</p>
   <section class="validation-summary" aria-label="檢核摘要">
     <span class="validation-summary__item validation-summary__item--error">錯誤 {{ view.validation.error_count }}</span>
@@ -109,8 +114,16 @@
           </thead>
           <tbody>
             {% for row in section.rows %}
-              <tr data-line-no="{{ loop.index }}">
+              <tr data-line-no="{{ loop.index }}"{% if section.modification_mode and section.row_line_nos and section.row_line_nos[loop.index0] is not none %} data-source-line-no="{{ section.row_line_nos[loop.index0] }}"{% endif %}>
                 {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+                {% if section.modification_mode %}
+                  {% set notes = section.row_modifications[loop.index0] if section.row_modifications else () %}
+                  <td data-modification-status="{{ 'modified' if notes else 'none' }}">
+                    {% for note in notes %}
+                      <div data-modified-note="true">已修改・{{ note.label }}（AI 原值：{{ note.original }}）</div>
+                    {% else %}本輪無修改紀錄{% endfor %}
+                  </td>
+                {% else %}
                 {% set original = section.row_originals[loop.index0] if section.row_originals else none %}
                 <td data-original-status="{{ original.status if original else 'no_snapshot' }}">
                   {% if original and original.status != "no_snapshot" %}
@@ -118,6 +131,7 @@
                     {% if original.note %}<small>（{{ original.note }}）</small>{% endif %}
                   {% else %}-{% endif %}
                 </td>
+                {% endif %}
               </tr>
             {% else %}
               <tr>
@@ -140,6 +154,29 @@
               {% endif %}
             {% endfor %}
           </div>
+        {% endif %}
+        {% if section.modification_mode and view.modifications %}
+          {% if view.modifications.unmatched_items %}
+            <section class="modification-list" data-unmatched-modifications="true" aria-label="無法對應到目前明細的修改紀錄">
+              <h3 class="modification-list__title">無法對應到目前明細的修改紀錄</h3>
+              <ul>
+                {% for note in view.modifications.unmatched_items %}
+                  <li>第 {{ note.line_no }} 筆・{{ note.label }}（AI 原值：{{ note.original }}）— {{ note.reason }}，未掛到任何一列</li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endif %}
+          {% if view.modifications.deleted_items %}
+            <section class="modification-list" data-deleted-items="true" aria-label="送出時已刪除的 AI 明細">
+              <h3 class="modification-list__title">AI 辨識但送出時已刪除的明細</h3>
+              <p class="form-hint">序號是 AI 辨識順序，與上表的明細序號無關，無法得知是否被其他明細取代。</p>
+              <ul>
+                {% for item in view.modifications.deleted_items %}
+                  <li data-ai-line-no="{{ item.ai_line_no }}">AI 第 {{ item.ai_line_no }} 筆：{% for label, text in item.cells %}{{ label }} {{ text }}{% if not loop.last %}、{% endif %}{% endfor %}{% if item.omitted_extra %}（另有未知欄位已省略）{% endif %}</li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endif %}
         {% endif %}
         {% if section.row_count_mismatch %}
           <p class="form-hint" data-row-count-mismatch="true">明細筆數與 AI 原始值不同，逐列比對僅供參考。</p>
@@ -177,25 +214,31 @@
             {% if part.status != "no_snapshot" %}<small class="field-block__original-status" data-original-status="{{ part.status }}">{{ ORIGINAL_LABEL.get(part.status, part.status) }}</small>{% endif %}
           </p>
         {% endfor %}
+        {% for note in section.modifications %}
+          <p class="field-block__modified" data-modified-note="true">已修改{% if note.label %}・{{ note.label }}{% endif %}（AI 原值：{{ note.original }}）</p>
+        {% endfor %}
         {{ issue_list(section.issues) }}
       </section>
     {% endif %}
   {% endfor %}
+  {% if view.modifications and view.modifications.other %}
+    <section class="field-block" data-other-modifications="true" aria-label="其他修改紀錄">
+      <h2 class="field-block__label">其他修改紀錄（無法歸類）</h2>
+      <p class="form-hint">以下紀錄無法對應到上方已知欄位，原樣列出，未丟棄。</p>
+      <ul class="modification-list__items">
+        {% for item in view.modifications.other %}
+          <li>範圍 {{ item.scope if item.scope else "-" }}・欄位 {{ item.name if item.name else "-" }}{% if item.line_no is not none %}・序號 {{ item.line_no }}{% endif %}：AI 原值 {{ item.original }}{% if item.submitted is not none %}；送出值 {{ item.submitted }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
   <div class="submit-area">
     {% if is_demo %}
     {# 離線展示頁：不呈現提交按鈕，提示不受檢核結果影響 #}
     <p class="form-hint" data-demo-submit-note="true">展示頁不提供提交（離線展示，沒有任何送出行為）。</p>
     {% else %}
-    {# 僅畫面狀態：沒有 form／action，不送出任何請求 #}
-    <button type="button"
-            class="btn btn--primary"
-            id="submit-control"
-            {% if not view.submit_control_enabled %}disabled aria-disabled="true"{% endif %}>提交</button>
-    {% if not view.submit_control_enabled %}
-      <p class="form-hint">仍有錯誤，修正後才能提交。</p>
-    {% else %}
-      <p class="form-hint">提交功能尚未接線（僅畫面狀態）。</p>
-    {% endif %}
+    {# 正式詳情頁唯讀：只檢視已送出的內容，沒有按鈕、form 或任何會送出請求的元素 #}
+    <p class="form-hint" data-readonly-note="true">此頁為唯讀，僅供檢視已送出的內容；目前不提供在此修改或重新提交。</p>
     {% endif %}
   </div>
 </div>

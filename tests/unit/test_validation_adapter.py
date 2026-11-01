@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from stage1_detail import API_DETAIL_ID, build_api_detail
 
 from app.clients import invoices as invoices_client
 from app.utils.invoice_confirmation import build_confirmation_view
@@ -230,12 +231,13 @@ def test_page_shows_comparison_and_row_location(
         {"field": "items", "code": "items_total_mismatch", "message": "合計不符"},
     ]
 
-    async def fake_fetch(token: str, invoice_id: Any) -> dict[str, Any]:
-        return _invoice({"issues": issues})
+    # 移到 Demo 路由：issue 的 line_no／expected／actual／difference 是 Stage 1 的 FieldWarning 沒有的欄位
+    # （demo_invoice.py 說明它們只是「來源若提供時的呈現」），正式路徑不可能出現
+    import app.routers.invoices as router_module
 
-    monkeypatch.setattr(invoices_client, "fetch_invoice", fake_fetch)
+    monkeypatch.setattr(router_module, "build_demo_invoice", lambda: _invoice({"issues": issues}))
 
-    html = logged_in_client.get("/invoices/1").text
+    html = logged_in_client.get("/invoices/demo/detail").text
 
     assert "第二筆金額不符" in html
     assert "預期：200" in " ".join(html.split())
@@ -248,12 +250,13 @@ def test_page_shows_comparison_and_row_location(
 def test_page_without_comparison_shows_no_comparison_text(
     logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # 正式路徑：API_WARNINGS 就是 Stage 1 warnings 的格式（只有 field／code／message）
     async def fake_fetch(token: str, invoice_id: Any) -> dict[str, Any]:
-        return _invoice(API_WARNINGS)
+        return build_api_detail(warnings=API_WARNINGS["warnings"])
 
     monkeypatch.setattr(invoices_client, "fetch_invoice", fake_fetch)
 
-    html = logged_in_client.get("/invoices/1").text
+    html = logged_in_client.get(f"/invoices/{API_DETAIL_ID}").text
 
     assert "預期：" not in html
     assert "未知等級" in html

@@ -164,6 +164,8 @@
 .invoice-detail .form-hint[data-row-count-mismatch],
 .invoice-detail .form-hint[data-row-compare-limited],
 .invoice-detail .form-hint[data-removed-rows],
+.invoice-detail .form-hint[data-modification-notice],
+.invoice-detail .form-hint[data-readonly-note],
 .invoice-detail .form-hint[data-demo-submit-note] {
   padding: 12px 15px;
   border-radius: 9px;
@@ -319,4 +321,30 @@
   .invoice-detail .field-block {
     padding: var(--space-3) var(--space-4);
   }
+}
+
+/* ---- API 修改紀錄：欄位備註、明細列備註、已刪除的 AI 明細 ---- */
+.invoice-detail .field-block__modified {
+  margin: var(--space-1) 0;
+  color: var(--idt-info-text);
+  font-size: var(--font-size-sm);
+}
+
+.invoice-detail [data-modified-note] {
+  color: var(--idt-info-text);
+}
+
+.invoice-detail .modification-list {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--idt-neutral-bg);
+  border: 1px dashed var(--idt-neutral-text);
+  border-radius: 9px;
+  color: var(--idt-text);
+}
+
+.invoice-detail .modification-list__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-base);
+  color: var(--idt-neutral-text);
 }
