@@ -441,3 +441,10 @@
 - 驗證（本機，Mock，不連任何服務）：pytest 978 passed、54 skipped；`node --test tests/js/` 79 pass；Ruff check／format、djLint、check_project（含 `--project-root ..`）、`app.core.environment --check` 通過。破壞性比對（逐一破壞後測試如預期失敗）：client 接受 boolean 為整數、略過 invoice_id 比對、明細備註改依位置、Adapter 靜默丟棄未知紀錄、API 失敗回退 Demo、Adapter 輸出 original_values、正式頁保留提交按鈕。
 - 過程失誤：破壞性比對時兩個備份檔同名，誤以 router 內容覆蓋了 `app/clients/invoices.py`；發現後從 `HEAD` 還原並重新套用同一份修改，再以全套測試確認；之後改用不同檔名的備份重做全部破壞性比對。
 - 未驗項目：真實 API／PostgreSQL（後端 Stage 1 亦未驗證）、真實手機、`submission_round` 大於 1 的 AI 原值基準、warnings 的 severity 政策、原圖（Stage 3）。
+
+## 2026-11-01 第一批 UX 合併後 3 個核對頁問題
+
+- 問題：(1) 修改總計後國字大寫不變；(2) 總計與銷售額＋稅額不一致時，核對頁沒有警示（業務警示只在按「上傳者確認」時取得）；(3) 輸入發票日期後，AI 辨識階段的「無法辨識發票日期，請輸入」仍留著。
+- 原因：(1) `total_amount_zh` 只是一般文字欄位，沒有任何隨總計更新的流程；(2) 設計上只在 `continueAfterRequired` 取警示，編輯時只會清除舊警示、不會重新取得；(3) 該提醒是辨識結果 `currentRecognition.warnings` 的靜態 `.field-warning`，使用者修改欄位後沒有任何程式更新它。（三者不是 UX-01～05 的回歸，是原本就沒有的行為。）
+- 處理檔案：`app/static/js/invoice-field-rules.js`（`amountToChinese`）、`app/static/js/mobile-camera.js`（`syncDerivedFields`、`syncRecognitionWarnings`、`scheduleLiveWarnings`／`runLiveWarnings`）、`tests/js/mobile_camera_ux_batch1.test.mjs`（新增 Bug1～3 共 9 個測試與假計時器）。
+- 驗證（本機離線）：`node --test tests/js/` 127 passed；pytest 760 passed、54 skipped；`check_project.py` PASS。未驗：真實瀏覽器／手機、真實 API。

@@ -36,6 +36,47 @@
     return String(value || '').replace(/[\s,，]/g, '');
   }
 
+  // ---- 總計國字大寫：只做顯示轉換（整數金額 → 壹貳參…元整），不判斷對錯；對錯仍由 API 規則負責 ----
+  var ZH_DIGITS = ['零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖'];
+  var ZH_UNITS = ['仟', '佰', '拾', ''];
+
+  // 0～9999 的一段（不含「零」開頭與段尾單位）
+  function zhSection(n) {
+    var out = '';
+    var pendingZero = false;
+    [1000, 100, 10, 1].forEach(function (base, i) {
+      var digit = Math.floor(n / base) % 10;
+      if (digit) {
+        if (pendingZero) out += ZH_DIGITS[0];
+        out += ZH_DIGITS[digit] + ZH_UNITS[i];
+        pendingZero = false;
+      } else if (out) {
+        pendingZero = true;
+      }
+    });
+    return out;
+  }
+
+  /**
+   * 整數金額字串 → 國字大寫（例如 3463 → 參仟肆佰陸拾參元整）。
+   * @param {string} value 金額文字（可含逗號、空白）。
+   * @returns {string|null} 無法轉換（空白、格式錯誤、有小數、超過 12 位數）回傳 null。
+   */
+  function amountToChinese(value) {
+    var text = cleanNumber(value).replace(/\.0+$/, '');
+    if (!/^[0-9]{1,12}$/.test(text)) return null;
+    var n = Number(text);
+    if (n === 0) return ZH_DIGITS[0] + '元整';
+    var yi = Math.floor(n / 1e8);
+    var wan = Math.floor(n / 1e4) % 1e4;
+    var ge = n % 1e4;
+    var out = '';
+    if (yi) out += zhSection(yi) + '億';
+    if (wan) out += (yi && wan < 1000 ? ZH_DIGITS[0] : '') + zhSection(wan) + '萬';
+    if (ge) out += ((yi || wan) && ge < 1000 ? ZH_DIGITS[0] : '') + zhSection(ge);
+    return out + '元整';
+  }
+
   // ---- 必填欄位（與 API InvoiceSubmitRequest 沒有預設值的欄位相同；recognition_id 為內部欄位不列入）----
   var REQUIRED_HEADER_FIELDS = [
     'invoice_track',
@@ -51,6 +92,50 @@
   var ITEM_FIELDS = ['item_name', 'quantity', 'unit_price', 'line_amount'];
 
   var FULL_WIDTH_DIGITS = /[０-９．]/;
+
+  // ---- 全形數字轉半形（只轉 ０-９，長度不變、保留前導零；其他字元一律不動、不刪除）----
+  // 只套用在要求半形數字的欄位（字軌是英文字母，不在其中）
+  var HALF_WIDTH_FIELDS = [
+    'invoice_number',
+    'seller_tax_id',
+    'buyer_tax_id',
+    'sales_amount',
+    'tax_amount',
+    'total_amount',
+    'line_amount',
+    'quantity',
+    'unit_price',
+  ];
+
+  function toHalfWidthDigits(value) {
+    return String(value === null || value === undefined ? '' : value).replace(/[０-９]/g, function (ch) {
+      return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+    });
+  }
+
+  // ---- 明細是否為「完全空白」：每個欄位去除前後空白後皆為空字串；數字 0 或字串 "0" 不是空白 ----
+  var ITEM_FIELD_NAMES = ['item_name', 'quantity', 'unit_price', 'line_amount'];
+
+  function isBlankItem(row) {
+    return !ITEM_FIELD_NAMES.some(function (field) {
+      var value = row ? row[field] : '';
+      return String(value === null || value === undefined ? '' : value).trim() !== '';
+    });
+  }
+
+  // ---- 未來日期（以台灣 Asia/Taipei 當天為準；台灣無日光節約，固定 UTC+8，與 API today_taipei 一致）----
+  var FUTURE_DATE_MESSAGE = '發票日期晚於今天，請核對原始發票。';
+
+  function taipeiToday(now) {
+    var base = now instanceof Date || (now && typeof now.getTime === 'function') ? now.getTime() : Date.now();
+    return new Date(base + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+
+  /** 有效日期且晚於台灣今天才是 true；無效或空白日期回 false（格式錯誤由格式提示處理）。 */
+  function isFutureDate(text, now) {
+    var value = String(text === null || text === undefined ? '' : text);
+    return isValidIsoDate(value) && value > taipeiToday(now);
+  }
 
   // 必填檢核無法完成（網路、API 錯誤、回應異常）時給使用者的說明；此時資料尚未送出
   var CHECK_FAILURE_MESSAGE = '目前無法完成必填欄位檢查，請稍後再試。資料尚未送出。';
@@ -256,10 +341,7 @@
     var rowNumbers = [];
     var items = [];
     draft.items.forEach(function (row, index) {
-      var hasContent = ITEM_FIELDS.some(function (field) {
-        return row[field];
-      });
-      if (!hasContent) return;
+      if (isBlankItem(row)) return; // 完全空白的新增明細不送出（與 buildPayload 同一判斷）
       rowIds.push(row.row_id);
       rowNumbers.push(index + 1);
       items.push({
@@ -393,7 +475,7 @@
    * @returns {string}
    */
   function warningText(warning, values) {
-    if (warning.code === 'invoice_date_future') return '發票日期晚於今天，請核對原始發票。';
+    if (warning.code === 'invoice_date_future') return FUTURE_DATE_MESSAGE;
     if (warning.code === 'total_amount_mismatch') {
       var detail = differenceText(values || {});
       return '總計與銷售額及營業稅額不一致，請核對。' + (detail ? detail : '');
@@ -454,6 +536,12 @@
     REQUIRED_HEADER_FIELDS: REQUIRED_HEADER_FIELDS,
     REQUIRED_ITEM_FIELDS: REQUIRED_ITEM_FIELDS,
     ITEM_FIELDS: ITEM_FIELDS,
+    HALF_WIDTH_FIELDS: HALF_WIDTH_FIELDS,
+    FUTURE_DATE_MESSAGE: FUTURE_DATE_MESSAGE,
+    toHalfWidthDigits: toHalfWidthDigits,
+    isBlankItem: isBlankItem,
+    taipeiToday: taipeiToday,
+    isFutureDate: isFutureDate,
     normalizeTrack: normalizeTrack,
     normalizeNumber: normalizeNumber,
     cleanNumber: cleanNumber,
@@ -468,6 +556,7 @@
     parseWarningResult: parseWarningResult,
     warningKey: warningKey,
     differenceText: differenceText,
+    amountToChinese: amountToChinese,
     warningText: warningText,
     planMissing: planMissing,
     placeMissing: placeMissing,

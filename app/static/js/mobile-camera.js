@@ -12,8 +12,9 @@
  *     API 寫入 invoice_field_reviews（供審核標示）與 invoice_changes（逐次修改）。
  *     比對規則 canonicalValue 須與 API invoice_upload_service._canonical_value 相同。
  *   - 欄位值一律以 value／textContent 寫入，不拼接 HTML，避免辨識內容被當成標記執行。
- *   - 必填欄位標示 *必填（清單與 API InvoiceSubmitRequest 相同）；欄位離開時顯示格式提示（格式正確／格式相容／格式錯誤，
- *     不改動輸入內容、不呼叫 API）；按「上傳者確認」才經 /invoices/check-required 檢核必填缺漏並一次顯示。
+ *   - 必填欄位標示 *必填（清單與 API InvoiceSubmitRequest 相同）；輸入時即時顯示格式提示並套紅／綠框（格式正確／格式相容／格式錯誤；
+ *     全形數字 ０-９ 自動轉半形，其餘不改動、不呼叫 API）；發票日期晚於台灣今天時即時顯示黃色提醒（不阻擋）；
+ *     完全空白的新增明細送出時略過並告知筆數；按「上傳者確認」才經 /invoices/check-required 檢核必填缺漏並一次顯示。
  *     格式規則與送出前的資料整理在 invoice-field-rules.js（純函式，有 node 測試）。
  */
 
@@ -124,6 +125,8 @@
   let currentRecognition = null; // API 辨識回應（顯示於 AI 回傳 JSON）
   // 核對中的欄位值；items 每列有 row_id 與 source_line_no（對應 AI 明細序號，新增的明細為 null）
   let currentDraft = null;
+  // 使用者親自改過「國字大寫」後，不再隨總計自動更新（清空後恢復自動）
+  let zhManual = false;
   let currentPayload = null; // 核對完成、準備查重與送出的內容
   let aiItems = {}; // AI 辨識明細：line_no → 明細
   let committed = new Map(); // 各欄位最後一次記入修改紀錄的值
@@ -981,12 +984,50 @@
     return warnings.filter((w) => (WARNING_TARGETS[w.field] || w.field) === key);
   }
 
+  // AI 辨識時提醒的是「AI 的值」；使用者把該欄位改成與 AI 不同的值後，那則提醒就過時了，隱藏並從摘要移除。
+  // 改回 AI 的值則恢復。明細（items）等沒有對應表頭欄位的提醒不受影響。
+  function recognitionWarningDismissed(warning) {
+    const field = WARNING_TARGETS[warning.field] || warning.field;
+    const input = $('#f-' + field);
+    if (!input) return false;
+    return canonicalValue(field, input.value) !== aiHeaderValue(field);
+  }
+
+  function syncRecognitionWarnings() {
+    if (!currentRecognition) return;
+    const warnings = currentRecognition.warnings || [];
+    document.querySelectorAll('#fields-container .field-warning').forEach((node) => {
+      const warning = warnings[Number(node.dataset.warningIndex)];
+      node.hidden = Boolean(warning) && recognitionWarningDismissed(warning);
+    });
+    renderRecognitionWarningList();
+  }
+
+  // 總計變動時，國字大寫跟著更新（只做轉換；是否一致由 API 警示負責）；使用者自己改過國字就不覆蓋
+  function syncDerivedFields(field) {
+    if (field === 'total_amount_zh') {
+      const zhInput = $('#f-total_amount_zh');
+      zhManual = Boolean(zhInput && zhInput.value.trim() !== '');
+      return;
+    }
+    if (field !== 'total_amount' || zhManual) return;
+    const total = $('#f-total_amount');
+    const zhInput = $('#f-total_amount_zh');
+    if (!total || !zhInput) return;
+    const next = Rules.amountToChinese(total.value) || '';
+    if (zhInput.value === next) return;
+    zhInput.value = next;
+    recordEdit('header', null, 'total_amount_zh', next);
+    markHeaderField('total_amount_zh');
+  }
+
   function markHeaderField(field) {
     const input = $('#f-' + field);
     if (!input) return;
     const group = input.closest('.field-group');
     const ai = aiHeaderValue(field);
     const modified = canonicalValue(field, input.value) !== ai;
+    syncRecognitionWarnings();
     group.classList.toggle('is-modified', modified);
     const note = group.querySelector('.field-modified');
     note.hidden = !modified;
@@ -1005,10 +1046,23 @@
     control.value = currentDraft[field] || '';
     control.id = 'f-' + field;
     control.dataset.field = field;
-    control.addEventListener('input', () => markHeaderField(field));
+    trackComposition(control);
+    // 組字中不處理；組字結束（compositionend）才轉半形，再更新「已修改」。先轉半形，才以轉換後的值和 AI 值比對
+    const onEdit = (event) => {
+      if (isComposing(control, event)) return;
+      normalizeControl(control, field, event);
+      markHeaderField(field);
+      if (field === 'invoice_date') updateFutureDateWarning();
+      syncDerivedFields(field);
+    };
+    control.addEventListener('input', onEdit);
+    control.addEventListener('compositionend', onEdit);
     control.addEventListener('change', () => {
+      normalizeControl(control, field);
       recordEdit('header', null, field, control.value);
       markHeaderField(field);
+      if (field === 'invoice_date') updateFutureDateWarning();
+      syncDerivedFields(field);
     });
     return control;
   }
@@ -1034,11 +1088,58 @@
     hint.hidden = false;
   }
 
-  // 輸入框下方的格式提示，以及補齊必填後清除該欄位的缺漏提示（不呼叫 API）
-  function attachFeedback(control, field, hintId, missingKeys) {
+  // 全形數字（０-９）自動轉半形：輸入、貼上時立即轉換；長度不變所以游標位置保持，其他字元不動。
+  // 不改變 AI 辨識的原始值（currentRecognition），「已修改」仍以轉換後的值和 AI 值比對。
+  // 輸入法組字狀態：compositionstart～compositionend 之間不得改寫輸入框內容，否則組字會被打斷。
+  // 瀏覽器的事件順序不一（Chrome 的最後一個 input 在 compositionend 之前、Safari 在之後），
+  // 所以同時看 event.isComposing 與自己追蹤的狀態；追蹤用的監聽器要比其他 compositionend 監聽器先註冊。
+  const composingControls = new WeakSet();
+
+  function trackComposition(control) {
+    control.addEventListener('compositionstart', () => composingControls.add(control));
+    control.addEventListener('compositionend', () => composingControls.delete(control));
+  }
+
+  function isComposing(control, event) {
+    return composingControls.has(control) || Boolean(event && event.isComposing);
+  }
+
+  function normalizeControl(control, field, event) {
+    if (isComposing(control, event)) return;
+    if (!Rules.HALF_WIDTH_FIELDS.includes(field)) return;
+    const next = Rules.toHalfWidthDigits(control.value);
+    if (next === control.value) return;
+    const start = control.selectionStart;
+    const end = control.selectionEnd;
+    control.value = next;
+    if (typeof start === 'number' && typeof control.setSelectionRange === 'function') {
+      try {
+        control.setSelectionRange(start, end);
+      } catch {
+        // 部分輸入型態不支援選取範圍，忽略
+      }
+    }
+  }
+
+  // 格式錯誤紅、格式正確綠；「已修改」另外以 is-modified 呈現，兩者互不取代（格式相容與無規則欄位不套色）
+  function markValidity(control, field) {
+    const state = Rules.evaluateField(field, control.value).state;
+    control.classList.toggle('is-invalid', state === 'error');
+    control.classList.toggle('is-valid', state === 'ok');
+    if (state === 'error') control.setAttribute('aria-invalid', 'true');
+    else if (!control.classList.contains('is-missing')) control.removeAttribute('aria-invalid');
+  }
+
+  // 輸入框下方的格式提示（輸入時即時更新，不呼叫 API）、補齊必填後清除缺漏提示，
+  // 以及開始編輯後清空必填欄位時立即標示缺漏。required() 回傳此欄位的必填描述（非必填或不適用回 null）。
+  function attachFeedback(control, field, hintId, missingKeys, required) {
     const hint = make('small', { class: 'field-hint', id: hintId, 'aria-live': 'polite', hidden: '' });
     control.after(hint);
     control.setAttribute('aria-describedby', hintId);
+    const refresh = () => {
+      showHint(hint, field, control.value);
+      markValidity(control, field);
+    };
     const clearIfFilled = () => {
       if (control.value.trim() === '') return;
       const present = missingKeys.filter((key) => missingState.has(key));
@@ -1046,12 +1147,25 @@
       present.forEach((key) => missingState.delete(key));
       renderMissing();
     };
-    control.addEventListener('input', () => {
-      hint.hidden = true; // 修改中先收起舊提示，離開欄位時再重新判斷
+    const flagIfCleared = () => {
+      if (control.value.trim() !== '' || !required) return;
+      const target = required();
+      if (!target || missingState.has(target.key)) return;
+      missingState.set(target.key, target);
+      renderMissing();
+    };
+    const onInput = (event) => {
+      if (isComposing(control, event)) return; // 組字中不驗證、不改寫；compositionend 時再處理
+      normalizeControl(control, field, event);
+      refresh();
       clearIfFilled();
-    });
+      flagIfCleared();
+    };
+    control.addEventListener('input', onInput);
+    control.addEventListener('compositionend', onInput);
     control.addEventListener('change', clearIfFilled);
-    control.addEventListener('blur', () => showHint(hint, field, control.value));
+    control.addEventListener('blur', refresh);
+    refresh(); // 頁面載入（或明細重新繪製）時，已有內容的欄位立刻顯示對錯，例如 AI 辨識出的錯誤統編
   }
 
   function headerField(field) {
@@ -1063,9 +1177,21 @@
       control.setAttribute('aria-required', 'true');
     }
     group.append(label, control);
-    attachFeedback(control, field, 'hint-' + control.id, [Rules.headerKey(field)]);
+    attachFeedback(control, field, 'hint-' + control.id, [Rules.headerKey(field)], () =>
+      Rules.REQUIRED_HEADER_FIELDS.includes(field)
+        ? { key: Rules.headerKey(field), field, rowId: null, text: '請補填' + FIELD_LABELS[field], summary: FIELD_LABELS[field] }
+        : null
+    );
     group.append(make('small', { class: 'field-modified', hidden: '' }));
-    warningsFor(field).forEach((w) => group.append(make('small', { class: 'field-warning' }, w.message)));
+    warningsFor(field).forEach((w) =>
+      group.append(
+        make(
+          'small',
+          { class: 'field-warning', 'data-warning-index': String(currentRecognition.warnings.indexOf(w)) },
+          w.message
+        )
+      )
+    );
     return group;
   }
 
@@ -1112,6 +1238,41 @@
     });
   }
 
+  // 畫面上某一列明細目前的輸入值（尚未離開欄位的輸入也包含在內）
+  function rowValues(rowEl) {
+    const values = {};
+    rowEl.querySelectorAll('[data-item-field]').forEach((el) => {
+      values[el.dataset.itemField] = el.value;
+    });
+    return values;
+  }
+
+  // 整列變成完全空白（會被略過）時，這列先前的必填缺漏不再適用：先暫存再移除；
+  // 之後又填入部分欄位，暫存的缺漏依目前內容恢復（欄位已補上的不恢復）。其他列與格式錯誤不受影響
+  function syncRowMissing(rowEl, row) {
+    const keys = Rules.REQUIRED_ITEM_FIELDS.map((field) => Rules.itemKey(row.row_id, field));
+    let changed = false;
+    if (Rules.isBlankItem(rowValues(rowEl))) {
+      keys.forEach((key) => {
+        if (!missingState.has(key)) return;
+        row.suspendedMissing = row.suspendedMissing || new Map();
+        row.suspendedMissing.set(key, missingState.get(key));
+        missingState.delete(key);
+        changed = true;
+      });
+    } else if (row.suspendedMissing) {
+      const index = currentDraft.items.indexOf(row) + 1;
+      row.suspendedMissing.forEach((target, key) => {
+        const element = missingElement(key);
+        if (!element || missingState.has(key) || String(element.value || '').trim() !== '') return;
+        missingState.set(key, { ...target, summary: '第 ' + index + ' 筆明細的' + FIELD_LABELS[target.field] });
+        changed = true;
+      });
+      row.suspendedMissing = null;
+    }
+    if (changed) renderMissing();
+  }
+
   function renderItems() {
     const box = $('#items-container');
     if (!box) return;
@@ -1153,8 +1314,16 @@
         input.dataset.itemField = field;
         input.value = row[field] || '';
         if (Rules.REQUIRED_ITEM_FIELDS.includes(field)) input.setAttribute('aria-required', 'true');
-        input.addEventListener('input', () => markItemRow(rowEl, row));
+        trackComposition(input);
+        const onItemEdit = (event) => {
+          if (isComposing(input, event)) return;
+          normalizeControl(input, field, event);
+          markItemRow(rowEl, row);
+        };
+        input.addEventListener('input', onItemEdit);
+        input.addEventListener('compositionend', onItemEdit);
         input.addEventListener('change', () => {
+          normalizeControl(input, field);
           row[field] = input.value.trim();
           recordEdit('item', row.row_id, field, input.value);
           markItemRow(rowEl, row);
@@ -1162,10 +1331,32 @@
         const cell = make('div', { class: 'item-row__cell item-row__cell--' + field });
         cell.append(input);
         rowEl.append(cell);
-        attachFeedback(input, field, 'hint-r' + row.row_id + '-' + field, [
-          Rules.itemKey(row.row_id, field),
-          Rules.ITEMS_KEY,
-        ]);
+        attachFeedback(
+          input,
+          field,
+          'hint-r' + row.row_id + '-' + field,
+          [Rules.itemKey(row.row_id, field), Rules.ITEMS_KEY],
+          // 整列都清空就是空白明細（送出時略過），不標缺漏；只有這列還有其他內容時，清空必填欄位才算缺漏
+          () => {
+            if (!Rules.REQUIRED_ITEM_FIELDS.includes(field)) return null;
+            if (Rules.isBlankItem(rowValues(rowEl))) return null;
+            const index = currentDraft.items.indexOf(row) + 1;
+            const label = FIELD_LABELS[field];
+            return {
+              key: Rules.itemKey(row.row_id, field),
+              field,
+              rowId: row.row_id,
+              text: '請補填' + label,
+              summary: '第 ' + index + ' 筆明細的' + label,
+            };
+          }
+        );
+        // 放在 attachFeedback 之後註冊：同一次輸入先處理本欄缺漏，再依整列內容同步其他欄位
+        const syncRow = (event) => {
+          if (!isComposing(input, event)) syncRowMissing(rowEl, row);
+        };
+        input.addEventListener('input', syncRow);
+        input.addEventListener('compositionend', syncRow);
       });
       rowEl.append(make('small', { class: 'field-modified item-row__note', hidden: '' }));
       const remove = make('button', { type: 'button', class: 'btn btn--secondary item-row__remove' }, '刪除');
@@ -1194,7 +1385,11 @@
     add.onclick = function () {
       collectDraft();
       if (currentDraft.items.length >= MAX_ITEMS) return notify('明細最多 ' + MAX_ITEMS + ' 筆');
-      currentDraft.items.push(newRow(null));
+      // added_by_user：使用者按「新增明細」建立的列；只有這種列才算「新增的空白明細」。
+      // AI 辨識的明細（有 source_line_no）與系統補的占位列都不是
+      const added = newRow(null);
+      added.added_by_user = true;
+      currentDraft.items.push(added);
       renderItems();
     };
     section.append(add);
@@ -1229,7 +1424,8 @@
     document.querySelectorAll('#fields-container .field-missing').forEach((node) => node.remove());
     document.querySelectorAll('#fields-container .is-missing').forEach((node) => {
       node.classList.remove('is-missing');
-      node.removeAttribute('aria-invalid');
+      // 缺漏解除不代表格式錯誤也解除：仍是格式錯誤（is-invalid）的欄位保留 aria-invalid
+      if (!node.classList.contains('is-invalid')) node.removeAttribute('aria-invalid');
     });
     const names = [];
     missingState.forEach((target, key) => {
@@ -1300,8 +1496,8 @@
     box.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
   }
 
-  function renderRecognitionSummary() {
-    const warnings = currentRecognition.warnings || [];
+  function renderRecognitionWarningList() {
+    const warnings = (currentRecognition.warnings || []).filter((w) => !recognitionWarningDismissed(w));
     setText(
       '#recognition-summary',
       (warnings.length ? 'AI 辨識完成，有 ' + warnings.length + ' 項需要核對：' : 'AI 辨識完成，請對照影像逐欄核對。') +
@@ -1313,13 +1509,87 @@
       warnings.forEach((w) => list.append(make('li', {}, w.message)));
       list.hidden = !warnings.length;
     }
+  }
+
+  function renderRecognitionSummary() {
+    renderRecognitionWarningList();
     setText('#ai-json', JSON.stringify(currentRecognition, null, 2));
+  }
+
+  // ---- 未來日期即時警示（黃色，只提醒、不阻擋）：以台灣日期判斷，選日期當下就更新，不呼叫 API ----
+  function updateFutureDateWarning() {
+    document.querySelectorAll('.field-date-live-warning').forEach((node) => node.remove());
+    const input = $('#f-invoice_date');
+    if (!input || !Rules.isFutureDate(input.value, new Date())) return;
+    const group = input.closest('.field-group');
+    if (group) group.append(make('small', { class: 'field-date-live-warning', role: 'note' }, Rules.FUTURE_DATE_MESSAGE));
+  }
+
+  // ---- AI 沒辨識到的必填欄位：載入時用淺黃提示列出（不畫紅框）；使用者補上後從清單移除 ----
+  let aiMissingEntries = [];
+
+  function stillEmpty(entry) {
+    const element = missingElement(entry.key);
+    if (!element) return false;
+    if (entry.key === Rules.ITEMS_KEY) {
+      // 以畫面上目前的輸入為準（currentDraft 的列要離開欄位才更新）
+      const rowEls = Array.from(document.querySelectorAll('#items-container [data-row-id]'));
+      return !rowEls.some((rowEl) => !Rules.isBlankItem(rowValues(rowEl)));
+    }
+    return String(element.value || '').trim() === '';
+  }
+
+  function updateAiMissingNote() {
+    const note = $('#ai-missing-note');
+    if (!note) return;
+    const names = aiMissingEntries.filter(stillEmpty).map((entry) => entry.summary);
+    note.textContent = '';
+    note.hidden = !names.length;
+    if (names.length) {
+      note.append(make('strong', {}, 'AI 沒有辨識到下列必填欄位，請對照影像補填：'), document.createTextNode(names.join('、')));
+    }
+  }
+
+  function renderAiMissingNote(container) {
+    aiMissingEntries = [];
+    Rules.REQUIRED_HEADER_FIELDS.forEach((field) => {
+      if (String(currentDraft[field] || '').trim() === '') {
+        aiMissingEntries.push({ key: Rules.headerKey(field), summary: FIELD_LABELS[field] });
+      }
+    });
+    if (!currentDraft.items.some((row) => !Rules.isBlankItem(row))) {
+      aiMissingEntries.push({ key: Rules.ITEMS_KEY, summary: '品名明細' });
+    } else {
+      currentDraft.items.forEach((row, index) => {
+        if (Rules.isBlankItem(row)) return;
+        Rules.REQUIRED_ITEM_FIELDS.forEach((field) => {
+          if (String(row[field] || '').trim() === '') {
+            aiMissingEntries.push({
+              key: Rules.itemKey(row.row_id, field),
+              summary: '第 ' + (index + 1) + ' 筆明細的' + FIELD_LABELS[field],
+            });
+          }
+        });
+      });
+    }
+    const note = make('div', { id: 'ai-missing-note', class: 'required-summary required-summary--notice', role: 'note', hidden: '' });
+    const anchor = container.querySelector('.field-note');
+    if (anchor) anchor.after(note);
+    else container.append(note);
+    updateAiMissingNote();
+    if (!container.dataset.aiMissingWatch) {
+      container.dataset.aiMissingWatch = '1';
+      ['input', 'change', 'click', 'compositionend'].forEach((type) =>
+        container.addEventListener(type, updateAiMissingNote)
+      );
+    }
   }
 
   function populateFields() {
     const container = $('#fields-container');
     if (!container || !currentDraft) return;
     container.textContent = '';
+    zhManual = false;
     const kind =
       currentRecognition.is_triplicate === true
         ? '三聯式統一發票'
@@ -1336,6 +1606,9 @@
     });
     renderItems();
     HEADER_FIELDS.forEach(markHeaderField);
+    updateFutureDateWarning();
+    renderAiMissingNote(container);
+    watchBusinessWarningEdits(); // 從載入就監看修改，確認期間的修改才不會漏掉
     renderRecognitionSummary();
     const ack = $('#uploaderAck');
     if (ack) ack.checked = false;
@@ -1383,8 +1656,15 @@
     }
     const items = [];
     const rows = [];
+    let skippedBlank = 0;
     for (const row of d.items) {
-      if (!ITEM_FIELDS.some((field) => row[field])) continue;
+      // 完全空白的新增明細不送出（以數字 0 或 "0" 填寫的不是空白）；與必填檢核的請求使用同一個判斷
+      if (Rules.isBlankItem(row)) {
+        // 空白列一律不送出；只有使用者自己新增的才計入「略過的新增明細」。
+        // 被清空的 AI 明細照既有語意不送出（API 以 deleted_item_N 記錄 AI 原值），不算新增
+        if (row.added_by_user) skippedBlank += 1;
+        continue;
+      }
       const line = items.length + 1;
       const lineAmount = cleanNumber(row.line_amount);
       const quantity = cleanNumber(row.quantity);
@@ -1423,6 +1703,7 @@
     }
     return {
       rows,
+      skippedBlank,
       payload: Object.assign(
         {
           recognition_id: currentRecognition.recognition_id,
@@ -1447,6 +1728,8 @@
   // 規則全部在 API（POST /invoices/check-warnings 與正式送出共用同一組）；這裡只負責顯示。
   // 使用者修改相關欄位後，舊警示立即清除，warningEpoch 讓「檢查期間又被修改」的過期結果不被當成最新。
   let warningEpoch = 0;
+  // 按「上傳者確認」收集欄位時的 warningEpoch；必填檢核期間欄位又被修改，後續就不能再用當時收集的內容
+  let confirmEpoch = 0;
 
   function clearBusinessWarnings() {
     document.querySelectorAll('.field-business-warning').forEach((node) => node.remove());
@@ -1466,13 +1749,74 @@
   function onWatchedEdit(event) {
     const target = event.target;
     if (event.type === 'click') {
-      if (target && target.closest && target.closest('button')) invalidateBusinessWarnings();
+      if (target && target.closest && target.closest('button')) {
+        invalidateBusinessWarnings();
+        scheduleLiveWarnings(); // 新增／刪除明細會改變明細合計
+      }
       return;
     }
     if (!target || typeof target.value !== 'string') return;
     if (event.type === 'change' && watchedValues.get(target) === target.value) return;
     watchedValues.set(target, target.value);
     invalidateBusinessWarnings();
+    if (affectsBusinessWarnings(target)) scheduleLiveWarnings();
+  }
+
+  // ---- 核對頁即時業務警示：修改日期、課稅別、統編、金額後，稍候以 API 預覽重新取得警示 ----
+  // 規則仍全部在 API（POST /invoices/check-warnings）；這裡只組出目前畫面的值並顯示欄位旁的提醒。
+  // 失敗時不打擾使用者（按「上傳者確認」時仍會重新檢核並說明）。
+  const LIVE_WARNING_DELAY_MS = 500;
+  const LIVE_WARNING_FIELDS = [
+    'invoice_date',
+    'tax_type',
+    'seller_tax_id',
+    'buyer_tax_id',
+    'sales_amount',
+    'tax_amount',
+    'total_amount',
+  ];
+  let liveWarningTimer = null;
+
+  function affectsBusinessWarnings(target) {
+    const field = target.dataset && target.dataset.field;
+    if (field) return LIVE_WARNING_FIELDS.includes(field);
+    return Boolean(target.dataset && target.dataset.itemField === 'line_amount');
+  }
+
+  function liveWarningBody() {
+    const body = { items: [] };
+    document.querySelectorAll('#fields-container [data-field]').forEach((input) => {
+      const field = input.dataset.field;
+      body[field] = AMOUNT_FIELDS.includes(field) || field.endsWith('tax_id') ? cleanNumber(input.value) : input.value.trim();
+    });
+    document.querySelectorAll('#items-container [data-row-id]').forEach((rowEl) => {
+      const values = rowValues(rowEl);
+      if (!Rules.isBlankItem(values)) body.items.push({ line_amount: cleanNumber(values.line_amount) });
+    });
+    return body;
+  }
+
+  function scheduleLiveWarnings() {
+    if (typeof setTimeout !== 'function') return;
+    if (liveWarningTimer !== null) clearTimeout(liveWarningTimer);
+    liveWarningTimer = setTimeout(runLiveWarnings, LIVE_WARNING_DELAY_MS);
+  }
+
+  async function runLiveWarnings() {
+    liveWarningTimer = null;
+    const epoch = warningEpoch;
+    const body = liveWarningBody();
+    const outcome = await fetchBusinessWarnings(body);
+    if (outcome.kind !== 'ok' || epoch !== warningEpoch) return; // 失敗，或等待期間又改了欄位
+    document.querySelectorAll('.field-business-warning').forEach((node) => node.remove());
+    if (outcome.warnings.some((w) => w.code === 'invoice_date_future')) {
+      document.querySelectorAll('.field-date-live-warning').forEach((node) => node.remove());
+    }
+    outcome.warnings.forEach((w) => {
+      const target = missingElement(Rules.warningKey(w));
+      const host = target && (target.closest('.field-group') || target);
+      if (host) host.append(make('small', { class: 'field-business-warning', role: 'note' }, Rules.warningText(w, body)));
+    });
   }
 
   function watchBusinessWarningEdits() {
@@ -1495,6 +1839,10 @@
       return;
     }
     if (!outcome.warnings.length) return;
+    // API 已回報未來日期時，改由它的警示顯示，移除即時警示避免重複
+    if (outcome.warnings.some((w) => w.code === 'invoice_date_future')) {
+      document.querySelectorAll('.field-date-live-warning').forEach((node) => node.remove());
+    }
     outcome.warnings.forEach((w) => {
       const text = Rules.warningText(w, payload);
       const target = missingElement(Rules.warningKey(w));
@@ -1521,8 +1869,23 @@
     }
   }
 
+  // 空白的新增明細不會送出：在確認頁明確告知略過幾筆（畫面上的列不刪除）
+  function renderSkippedBlankNote(count) {
+    const note = $('#skipped-blank-items');
+    const message = '已略過 ' + count + ' 筆空白的新增明細，這些明細不會送出。';
+    if (note) {
+      note.textContent = count ? message : '';
+      note.hidden = !count;
+    }
+  }
+
   // 必填欄位完整後，才進行原有的格式檢查；通過後取最新業務警示，再進入查重與確認送出
   async function continueAfterRequired() {
+    // 必填檢核期間欄位被改過：currentDraft 是檢核前收集的舊內容，不能拿來組送出內容或取警示
+    if (confirmEpoch !== warningEpoch) {
+      clearBusinessWarnings();
+      return notify('檢查期間欄位又被修改，請再按一次「上傳者確認」。');
+    }
     const built = buildPayload();
     if (built.error) {
       clearBusinessWarnings();
@@ -1541,6 +1904,7 @@
     setText('#sum-sales-amount', currentPayload.sales_amount);
     setText('#sum-total-amount', currentPayload.total_amount);
     renderModifiedSummary(currentPayload);
+    renderSkippedBlankNote(built.skippedBlank);
     // 以顯示警示當下的欄位值為基準：之後瀏覽器補送、值沒變的 change 不算修改
     ['#fields-container [data-field]', '#fields-container [data-item-field]'].forEach((selector) => {
       document.querySelectorAll(selector).forEach((control) => watchedValues.set(control, control.value));
@@ -1841,7 +2205,10 @@
             return Boolean(ack && ack.checked);
           },
           notifyAck: () => notify('請勾選「我已核對影像與辨識內容，確認資料正確」'),
-          collect: collectDraft,
+          collect: () => {
+            collectDraft();
+            confirmEpoch = warningEpoch;
+          },
           buildCheckBody: () => Rules.buildCheckRequest(currentDraft, currentRecognition.recognition_id),
           checkRequired: (body) => postJson('/invoices/check-required', body),
           showMissing,

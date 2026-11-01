@@ -107,6 +107,8 @@
         總計：$<strong id="sum-total-amount"></strong>
       </p>
     </div>
+    {# 完全空白的新增明細不會送出；由 mobile-camera.js 填入略過筆數 #}
+    <div id="skipped-blank-items" class="alert alert--warning" role="status" hidden></div>
     {# 與 AI 辨識值不同的欄位；送出後寫入 invoice_field_reviews 供審核標示 #}
     <div id="modified-summary" class="alert">
       <p id="modified-title"></p>
