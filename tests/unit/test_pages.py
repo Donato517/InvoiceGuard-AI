@@ -93,12 +93,15 @@ def test_invoice_list_renders_api_result(
     async def fake_fetch_invoices(token: str, **kwargs: Any) -> dict[str, Any]:
         assert token == "test-access-token"
         item = {
-            "id": 1,
-            "invoice_number": "AB12345678",
+            "invoice_id": "11111111-1111-4111-8111-111111111111",
+            "status": "pending_department_approval",
+            "submission_round": 1,
+            "submitted_at": "2026-10-21T02:00:00Z",
+            "invoice_track": "AB",
+            "invoice_number": "12345678",
             "invoice_date": "2026-10-21",
-            "total_amount": "1234.5",
-            "status": "flagged",
-            "risk_score": 87,
+            "seller_name": "賣方",
+            "total_amount": "1234.50",
         }
         return {"items": [item], "total": 1, "page": 1, "page_size": 20}
 
@@ -109,7 +112,8 @@ def test_invoice_list_renders_api_result(
     assert response.status_code == 200
     assert "AB12345678" in response.text
     assert "NT$ 1,234.5" in response.text
-    assert "有風險" in response.text
+    assert "待單位核准" in response.text
+    assert "/invoices/11111111-1111-4111-8111-111111111111" in response.text
 
 
 def test_expired_token_redirects_to_login(

@@ -40,3 +40,6 @@ AGENTS.md 說明三站架構、閱讀順序與共同約定；README 說明使用
 精確檢查與限制見 [PROJECT_CHECKS.md](PROJECT_CHECKS.md)，實測結果見 [TEST_REPORT.md](TEST_REPORT.md)，修正紀錄見 [REVIEW_FIX_LOG.md](REVIEW_FIX_LOG.md)。
 
 C 組第一批 UX 合併後修正（2026-11-01，分支 feature/c-ux-field-check-batch2，前台 `mobile-camera.js`、`invoice-field-rules.js`）：(1) 修改總計時，國字大寫依整數金額自動更新（`Rules.amountToChinese`，只做顯示轉換；使用者自己改過國字就不覆蓋，清空後恢復自動），變更同時記入修改紀錄；(2) 核對頁修改日期、課稅別、統編、金額、明細金額後，延遲 500 ms 呼叫既有 `POST /invoices/check-warnings` 並在欄位旁顯示警示（規則仍只在 API；失敗時不顯示、不阻擋，按「上傳者確認」仍會重新檢核）；(3) AI 辨識階段的欄位提醒（如「無法辨識發票日期，請輸入」）在使用者把該欄位改成與 AI 不同的值後隱藏並從摘要移除，改回 AI 值則恢復。未動 API、ADMIN、Schema；國字大寫格式（不含「新臺幣」前綴、尾端「元整」）待財會確認；真實瀏覽器、手機與真實 API 尚未驗收。
+
+我的發票列表（2026-11-02，分支 feature/c-invoice-list-frontend）：`GET /invoices` 經 `invoices_client.fetch_invoices` 讀後端 `GET /api/v1/invoices`（只含提交者本人），client 驗證回應契約（UUID、狀態字串、輪次、分頁數字與請求一致，不符 502），畫面使用九種簽核狀態（`app/utils/invoice_status.py`）、UUID 連到詳情頁、不顯示風險分數；空列表、篩選無資料、超出最後一頁、未登入（導向登入）、API 失敗（錯誤頁）皆有處理。非法狀態視為「全部」，不轉送 API。共用常數 `INVOICE_STATUS_LABEL`（舊 5 種）不再供列表使用，但未修改。範圍僅限本人提交的發票，不含同部門列表。
+驗證：Mock 單元測試通過；以隔離 PostgreSQL 15（Schema v1.8 去除 pgvector、啟用自簽 TLS）＋本機 API 程序＋本機前台程序，經真實 HTTP 與真實登入驗證列表、分頁、篩選、他人隔離與詳情連結。未對正式 DB／部署環境／手機瀏覽器驗證。
