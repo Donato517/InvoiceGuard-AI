@@ -427,3 +427,10 @@
 - 不變的行為：正常 JSON 原樣轉出；合法 JSON 但結構異常（`{}`、`[]` 等）仍原樣轉出，由前端拒絕；401 導向登入、4xx 原樣、5xx（含非 JSON 錯誤本文）、連線失敗與逾時（502 `NETWORK_ERROR`）皆有測試確認不變。
 - 驗證（本機，不連任何服務，以不寫入專案的方式執行）：`test_required_check_proxy.py` 31 passed（修改前該檔 14 個、新增 17 個，使用 `httpx.MockTransport` 走真實 `request_json`）；前台全站 pytest 743 passed、54 skipped（全部略過皆在 `test_project_governance.py`，數量與修改前相同）；JS 55 passed；Ruff check／format --check 通過；`scripts/check_project.py` PASS；scratchpad 外部重放 18 passed（不在專案內）。
 - 未驗項目：真實 DB、真實 Session 與登入、瀏覽器畫面、手機 UI、部署環境；API 的 `check-required` 分支尚未提交合併，未與合併後的 API 一起實測。字軌提示與提交整理規則的差異（ß、ı、ſ、ﬁ）維持記錄為後續改善，本次未處理。
+
+## 2026-11-01 第一批 UX 合併後 3 個核對頁問題
+
+- 問題：(1) 修改總計後國字大寫不變；(2) 總計與銷售額＋稅額不一致時，核對頁沒有警示（業務警示只在按「上傳者確認」時取得）；(3) 輸入發票日期後，AI 辨識階段的「無法辨識發票日期，請輸入」仍留著。
+- 原因：(1) `total_amount_zh` 只是一般文字欄位，沒有任何隨總計更新的流程；(2) 設計上只在 `continueAfterRequired` 取警示，編輯時只會清除舊警示、不會重新取得；(3) 該提醒是辨識結果 `currentRecognition.warnings` 的靜態 `.field-warning`，使用者修改欄位後沒有任何程式更新它。（三者不是 UX-01～05 的回歸，是原本就沒有的行為。）
+- 處理檔案：`app/static/js/invoice-field-rules.js`（`amountToChinese`）、`app/static/js/mobile-camera.js`（`syncDerivedFields`、`syncRecognitionWarnings`、`scheduleLiveWarnings`／`runLiveWarnings`）、`tests/js/mobile_camera_ux_batch1.test.mjs`（新增 Bug1～3 共 9 個測試與假計時器）。
+- 驗證（本機離線）：`node --test tests/js/` 127 passed；pytest 760 passed、54 skipped；`check_project.py` PASS。未驗：真實瀏覽器／手機、真實 API。

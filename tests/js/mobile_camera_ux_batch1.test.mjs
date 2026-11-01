@@ -134,11 +134,12 @@ class FakeEl {
 const ID = (el, id) => { el.attrs.id = id; return el }
 
 let AI_OVERRIDE = {}
+let AI_WARNINGS = []
 function aiInvoice() {
   const base = {
     recognition_id: 'rec-1',
     is_triplicate: true,
-    warnings: [],
+    warnings: AI_WARNINGS,
     invoice: {
       invoice_track: 'TL', invoice_number: '28281500', invoice_date: '2020-01-15',
       buyer_name: '', buyer_tax_id: '', seller_name: '範例商行', seller_tax_id: '27601907',
@@ -181,6 +182,7 @@ async function setup() {
 
   const calls = []
   const alerts = []
+  const timers = []
   const json = (data, ok = true) => ({ ok, redirected: false, url: '', json: async () => data })
   const routes = {
     '/invoices/mobile-recognize': () => json(aiInvoice()),
@@ -197,6 +199,9 @@ async function setup() {
       addEventListener: (t, fn) => { listeners[t] = fn }
     }),
     alert: (m) => alerts.push(m),
+    // 假計時器：不自動執行，測試用 flushTimers() 明確觸發（核對頁即時警示的延遲）
+    setTimeout: (fn) => { timers.push(fn); return timers.length },
+    clearTimeout: (id) => { if (id) timers[id - 1] = null },
     fetch: async (url, opts) => { calls.push({ url, opts }); return routes[url]() },
     URL: Object.assign(function () {}, { createObjectURL: () => 'blob:x', revokeObjectURL() {} }),
     FormData,
@@ -225,6 +230,11 @@ async function setup() {
 
   const page = {
     calls, alerts, fields, ids, routes, json,
+    async flushTimers() {
+      const pending = timers.splice(0).filter(Boolean)
+      pending.forEach((fn) => fn())
+      await new Promise((r) => setTimeout(r, 0))
+    },
     addButton: () => fields.querySelectorAll('button').find((b) => b.textContent === '新增明細'),
     rows: () => fields.querySelectorAll('.item-row'),
     input: (row, name) => row.querySelector(`[data-item-field="${name}"]`),
@@ -741,4 +751,124 @@ test('P2 殘留缺漏：清空 AI 明細整列仍不計入「空白新增明細�
   await page.submit()
   assert.equal(skippedNote(page).textContent, '')
   assert.deepEqual(lastBody(page, '/invoices/check-required').items.map((i) => i.source_line_no), [1])
+})
+
+
+// =====================================================================
+// 第一批 UX 合併後的 3 個 bug：國字大寫同步、核對頁即時金額警示、AI 缺漏提示在使用者補填後清除
+// =====================================================================
+const warningsOf = (page) => page.fields.querySelectorAll('.field-business-warning')
+const visibleAiWarnings = (page) => page.fields.querySelectorAll('.field-warning').filter((n) => !n.hidden)
+
+test('Bug1：amountToChinese 轉換（含中間零、萬／億段、無法轉換回 null）', async () => {
+  const R = await rulesOf()
+  assert.equal(R.amountToChinese('3463'), '參仟肆佰陸拾參元整')
+  assert.equal(R.amountToChinese('34630'), '參萬肆仟陸佰參拾元整')
+  assert.equal(R.amountToChinese('1,050'), '壹仟零伍拾元整')
+  assert.equal(R.amountToChinese('10005'), '壹萬零伍元整')
+  assert.equal(R.amountToChinese('100000000'), '壹億元整')
+  assert.equal(R.amountToChinese('100000005'), '壹億零伍元整')
+  assert.equal(R.amountToChinese('0'), '零元整')
+  assert.equal(R.amountToChinese('12.5'), null)
+  assert.equal(R.amountToChinese(''), null)
+  assert.equal(R.amountToChinese('abc'), null)
+})
+
+test('Bug1：修改總計後國字大寫即時更新，不殘留舊值，並記入修改紀錄', async () => {
+  const page = await load({ sales_amount: '32981', tax_amount: '1649', total_amount: '34630', total_amount_zh: '參萬肆仟陸佰參拾元整' })
+  typeLive(ctl(page, 'total_amount'), '3463')
+  assert.equal(ctl(page, 'total_amount_zh').value, '參仟肆佰陸拾參元整')
+  typeLive(ctl(page, 'total_amount'), '')
+  assert.equal(ctl(page, 'total_amount_zh').value, '')
+  typeLive(ctl(page, 'total_amount'), '34630')
+  assert.equal(ctl(page, 'total_amount_zh').value, '參萬肆仟陸佰參拾元整')
+  typeLive(ctl(page, 'total_amount'), '3463')
+  await page.submit(); await tick()
+  const body = lastBody(page, '/invoices/check-warnings')
+  assert.equal(body.total_amount_zh, '參仟肆佰陸拾參元整')
+})
+
+test('Bug1：使用者自己改過國字大寫就不覆蓋；清空後恢復自動', async () => {
+  const page = await load({ total_amount: '315', total_amount_zh: '' })
+  typeLive(ctl(page, 'total_amount_zh'), '參佰壹拾伍元')
+  typeLive(ctl(page, 'total_amount'), '3463')
+  assert.equal(ctl(page, 'total_amount_zh').value, '參佰壹拾伍元')
+  typeLive(ctl(page, 'total_amount_zh'), '')
+  typeLive(ctl(page, 'total_amount'), '3464')
+  assert.equal(ctl(page, 'total_amount_zh').value, '參仟肆佰陸拾肆元整')
+})
+
+test('Bug2：總計與銷售額＋稅額不一致時，核對頁稍後顯示警示；改回一致後消失', async () => {
+  const page = await load({ sales_amount: '32981', tax_amount: '1649', total_amount: '34630' })
+  let mismatch = true
+  page.routes['/invoices/check-warnings'] = () =>
+    page.json({ warnings: mismatch ? [{ field: 'total_amount', code: 'total_amount_mismatch', message: 'x' }] : [], checked_on: '2026-11-01' })
+  typeLive(ctl(page, 'total_amount'), '3463')
+  assert.equal(warningsOf(page).length, 0) // 尚未到延遲時間
+  await page.flushTimers()
+  assert.equal(warningsOf(page).length, 1)
+  assert.deepEqual(lastBody(page, '/invoices/check-warnings').total_amount, '3463')
+  mismatch = false
+  typeLive(ctl(page, 'total_amount'), '34630')
+  assert.equal(warningsOf(page).length, 0) // 修改當下舊警示立即清除
+  await page.flushTimers()
+  assert.equal(warningsOf(page).length, 0)
+})
+
+test('Bug2：即時警示請求進行中又修改，舊回應不顯示；API 失敗時不顯示也不阻擋', async () => {
+  const page = await load()
+  page.routes['/invoices/check-warnings'] = () =>
+    page.json({ warnings: [{ field: 'total_amount', code: 'total_amount_mismatch', message: 'x' }], checked_on: '2026-11-01' })
+  typeLive(ctl(page, 'total_amount'), '1')
+  const flushing = page.flushTimers()
+  typeLive(ctl(page, 'total_amount'), '315') // 回應回來前又修改
+  await flushing
+  assert.equal(warningsOf(page).length, 0)
+  delete page.routes['/invoices/check-warnings'] // 之後的請求會丟錯
+  typeLive(ctl(page, 'total_amount'), '2')
+  await page.flushTimers()
+  assert.equal(warningsOf(page).length, 0)
+  assert.deepEqual(page.alerts, [])
+})
+
+test('Bug2：與警示無關的欄位（名稱）修改不呼叫 API 預覽', async () => {
+  const page = await load()
+  typeLive(ctl(page, 'seller_name'), '新商行')
+  await page.flushTimers()
+  assert.equal(page.calls.filter((c) => c.url === '/invoices/check-warnings').length, 0)
+})
+
+const DATE_MISSING = { field: 'invoice_date', code: 'invoice_date_invalid', message: '無法辨識發票日期，請輸入' }
+async function loadWithWarnings(warnings, override = {}) {
+  AI_WARNINGS = warnings
+  try {
+    return await load(override)
+  } finally {
+    AI_WARNINGS = []
+  }
+}
+const summaryItems = (page) => pageRoot(page).querySelector('#recognition-warnings')
+
+test('Bug3：AI 沒辨識到日期，使用者輸入有效日期後，「請輸入」提示移除；未來日期警示仍在', async () => {
+  const page = await loadWithWarnings([DATE_MISSING], { invoice_date: null })
+  assert.equal(visibleAiWarnings(page).length, 1) // 載入時顯示
+  typeLive(ctl(page, 'invoice_date'), '2999-11-28')
+  assert.equal(visibleAiWarnings(page).length, 0)
+  assert.equal(page.fields.querySelectorAll('.field-date-live-warning').length, 1)
+})
+
+test('Bug3：使用者改回與 AI 相同的值（仍是空白）時提示恢復；有值又清空時以必填缺漏處理', async () => {
+  const page = await loadWithWarnings([DATE_MISSING], { invoice_date: null })
+  typeLive(ctl(page, 'invoice_date'), '2026-11-01')
+  assert.equal(visibleAiWarnings(page).length, 0)
+  typeLive(ctl(page, 'invoice_date'), '')
+  assert.equal(visibleAiWarnings(page).length, 1)
+})
+
+test('Bug3：不相關欄位的 AI 提示、明細提示不受影響', async () => {
+  const items = { field: 'items', code: 'items_missing', message: '未辨識到品名明細，請輸入' }
+  const page = await loadWithWarnings([DATE_MISSING, items], { invoice_date: null })
+  typeLive(ctl(page, 'invoice_date'), '2026-11-01')
+  const kept = visibleAiWarnings(page).map((n) => n.textContent)
+  assert.deepEqual(kept.filter((t) => t.includes('日期')), [])
 })

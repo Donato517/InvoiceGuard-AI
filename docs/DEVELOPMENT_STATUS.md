@@ -36,3 +36,5 @@ C 組欄位核對 UX 第一批（2026-10-31，分支 feature/c-ux-field-check-ba
 AGENTS.md 說明三站架構、閱讀順序與共同約定；README 說明使用方式；ARCHITECTURE／CODING_CONVENTIONS 管目錄與格式；ADMIN/API MODULE_CONTRACT 管型別與未實作邊界；API 的 app/db/README.md 管 Schema 權威。若文件與實際程式衝突，先指出並對齊，不能擅自繞過保護。單站 clone 無兄弟專案時仍可執行本站檢查；不得為讀取兄弟站而索取管理員 Token。
 
 精確檢查與限制見 [PROJECT_CHECKS.md](PROJECT_CHECKS.md)，實測結果見 [TEST_REPORT.md](TEST_REPORT.md)，修正紀錄見 [REVIEW_FIX_LOG.md](REVIEW_FIX_LOG.md)。
+
+C 組第一批 UX 合併後修正（2026-11-01，分支 feature/c-ux-field-check-batch2，前台 `mobile-camera.js`、`invoice-field-rules.js`）：(1) 修改總計時，國字大寫依整數金額自動更新（`Rules.amountToChinese`，只做顯示轉換；使用者自己改過國字就不覆蓋，清空後恢復自動），變更同時記入修改紀錄；(2) 核對頁修改日期、課稅別、統編、金額、明細金額後，延遲 500 ms 呼叫既有 `POST /invoices/check-warnings` 並在欄位旁顯示警示（規則仍只在 API；失敗時不顯示、不阻擋，按「上傳者確認」仍會重新檢核）；(3) AI 辨識階段的欄位提醒（如「無法辨識發票日期，請輸入」）在使用者把該欄位改成與 AI 不同的值後隱藏並從摘要移除，改回 AI 值則恢復。未動 API、ADMIN、Schema；國字大寫格式（不含「新臺幣」前綴、尾端「元整」）待財會確認；真實瀏覽器、手機與真實 API 尚未驗收。

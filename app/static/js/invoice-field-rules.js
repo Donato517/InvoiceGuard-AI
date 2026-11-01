@@ -36,6 +36,47 @@
     return String(value || '').replace(/[\s,，]/g, '');
   }
 
+  // ---- 總計國字大寫：只做顯示轉換（整數金額 → 壹貳參…元整），不判斷對錯；對錯仍由 API 規則負責 ----
+  var ZH_DIGITS = ['零', '壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖'];
+  var ZH_UNITS = ['仟', '佰', '拾', ''];
+
+  // 0～9999 的一段（不含「零」開頭與段尾單位）
+  function zhSection(n) {
+    var out = '';
+    var pendingZero = false;
+    [1000, 100, 10, 1].forEach(function (base, i) {
+      var digit = Math.floor(n / base) % 10;
+      if (digit) {
+        if (pendingZero) out += ZH_DIGITS[0];
+        out += ZH_DIGITS[digit] + ZH_UNITS[i];
+        pendingZero = false;
+      } else if (out) {
+        pendingZero = true;
+      }
+    });
+    return out;
+  }
+
+  /**
+   * 整數金額字串 → 國字大寫（例如 3463 → 參仟肆佰陸拾參元整）。
+   * @param {string} value 金額文字（可含逗號、空白）。
+   * @returns {string|null} 無法轉換（空白、格式錯誤、有小數、超過 12 位數）回傳 null。
+   */
+  function amountToChinese(value) {
+    var text = cleanNumber(value).replace(/\.0+$/, '');
+    if (!/^[0-9]{1,12}$/.test(text)) return null;
+    var n = Number(text);
+    if (n === 0) return ZH_DIGITS[0] + '元整';
+    var yi = Math.floor(n / 1e8);
+    var wan = Math.floor(n / 1e4) % 1e4;
+    var ge = n % 1e4;
+    var out = '';
+    if (yi) out += zhSection(yi) + '億';
+    if (wan) out += (yi && wan < 1000 ? ZH_DIGITS[0] : '') + zhSection(wan) + '萬';
+    if (ge) out += ((yi || wan) && ge < 1000 ? ZH_DIGITS[0] : '') + zhSection(ge);
+    return out + '元整';
+  }
+
   // ---- 必填欄位（與 API InvoiceSubmitRequest 沒有預設值的欄位相同；recognition_id 為內部欄位不列入）----
   var REQUIRED_HEADER_FIELDS = [
     'invoice_track',
@@ -515,6 +556,7 @@
     parseWarningResult: parseWarningResult,
     warningKey: warningKey,
     differenceText: differenceText,
+    amountToChinese: amountToChinese,
     warningText: warningText,
     planMissing: planMissing,
     placeMissing: placeMissing,
