@@ -1,9 +1,10 @@
 {#
   @template pages/invoices/list.html
-  @description 我的發票列表：依狀態篩選（HTMX 只替換表格區塊）、分頁。
+  @description 我的發票列表（只含本人提交的發票）：依九種簽核狀態篩選（HTMX 只替換表格區塊）、分頁。
   @route GET /invoices（需登入）
-  @context result: dict       API 分頁結果 {items, total, page, page_size}
-  @context status: str | None 目前篩選的狀態；None 為全部
+  @context view: dict            build_list_view 的結果 {rows, total, page, page_size, total_pages, pages}
+  @context status: str | None    目前篩選的狀態代碼；None 為全部
+  @context status_options: list  [(代碼, 顯示文字)]，九種簽核狀態
 #}
 {% extends "layouts/default.html" %}
 {% block title %}我的發票{% endblock %}
@@ -25,7 +26,7 @@
     <label for="status">狀態</label>
     <select id="status" name="status">
       <option value="">全部</option>
-      {% for value, label in INVOICE_STATUS_LABEL.items() %}
+      {% for value, label in status_options %}
         <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
       {% endfor %}
     </select>
@@ -34,41 +35,58 @@
     </noscript>
   </form>
   <div id="invoice-table">
-    {# 注意：result 是 dict，需用 result["items"]，result.items 會取到 dict 的 items 方法 #}
-    {% if result["items"] %}
+    {% if view.rows %}
+      <p class="table-summary">共 {{ view.total }} 張，第 {{ view.page }} / {{ view.total_pages }} 頁</p>
       <table class="table">
         <thead>
           <tr>
             <th scope="col">發票號碼</th>
             <th scope="col">開立日期</th>
-            <th scope="col">金額</th>
+            <th scope="col">賣方</th>
+            <th scope="col">總計</th>
             <th scope="col">狀態</th>
-            <th scope="col">風險分數</th>
+            <th scope="col">送出時間</th>
           </tr>
         </thead>
         <tbody>
-          {% for invoice in result["items"] %}
+          {% for row in view.rows %}
             <tr>
               <td>
-                <a href="/invoices/{{ invoice.id }}">{{ invoice.invoice_number }}</a>
+                <a href="/invoices/{{ row.invoice_id }}">{{ row.number }}</a>
               </td>
-              <td>{{ invoice.invoice_date }}</td>
-              <td>{{ invoice.total_amount | currency }}</td>
+              <td>{{ row.invoice_date or "-" }}</td>
+              <td>{{ row.seller_name or "-" }}</td>
+              <td>{{ row.total_amount | currency }}</td>
               <td>
-                <span class="badge badge--{{ invoice.status }}">{{ INVOICE_STATUS_LABEL.get(invoice.status, invoice.status) }}</span>
+                <span class="badge {% if row.tone %}badge--{{ row.tone }}{% endif %}">{{ row.status.label }}</span>
+                {% if row.round_text != "-" %}<small class="muted">{{ row.round_text }}</small>{% endif %}
               </td>
-              <td>{{ invoice.risk_score if invoice.risk_score is not none else "-" }}</td>
+              <td>{{ row.submitted_at | taipei_datetime }}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
-      {% set total_pages = ((result.total + result.page_size - 1) // result.page_size) or 1 %}
-      <nav class="pagination" aria-label="分頁">
-        {% for number in range(1, total_pages + 1) %}
-          <a href="/invoices?page={{ number }}{% if status %}&status={{ status }}{% endif %}"
-             class="pagination__item {% if number == result.page %}pagination__item--active{% endif %}">{{ number }}</a>
-        {% endfor %}
-      </nav>
+      {% if view.total_pages > 1 %}
+        <nav class="pagination" aria-label="分頁">
+          {% for number in view.pages %}
+            {% if number is none %}
+              <span class="pagination__gap" aria-hidden="true">…</span>
+            {% else %}
+              <a href="/invoices?page={{ number }}{% if status %}&status={{ status }}{% endif %}"
+                 class="pagination__item {% if number == view.page %}pagination__item--active{% endif %}"
+                 {% if number == view.page %}aria-current="page"{% endif %}>{{ number }}</a>
+            {% endif %}
+          {% endfor %}
+        </nav>
+      {% endif %}
+    {% elif view.total %}
+      <p class="empty-state">
+        這一頁沒有資料，<a href="/invoices{% if status %}?status={{ status }}{% endif %}">回到第一頁</a>。
+      </p>
+    {% elif status %}
+      <p class="empty-state">
+        沒有符合這個狀態的發票，<a href="/invoices">查看全部</a>。
+      </p>
     {% else %}
       <p class="empty-state">
         目前沒有發票，<a href="/invoices/upload">上傳第一張</a>。

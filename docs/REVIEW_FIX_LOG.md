@@ -448,3 +448,9 @@
 - 原因：(1) `total_amount_zh` 只是一般文字欄位，沒有任何隨總計更新的流程；(2) 設計上只在 `continueAfterRequired` 取警示，編輯時只會清除舊警示、不會重新取得；(3) 該提醒是辨識結果 `currentRecognition.warnings` 的靜態 `.field-warning`，使用者修改欄位後沒有任何程式更新它。（三者不是 UX-01～05 的回歸，是原本就沒有的行為。）
 - 處理檔案：`app/static/js/invoice-field-rules.js`（`amountToChinese`）、`app/static/js/mobile-camera.js`（`syncDerivedFields`、`syncRecognitionWarnings`、`scheduleLiveWarnings`／`runLiveWarnings`）、`tests/js/mobile_camera_ux_batch1.test.mjs`（新增 Bug1～3 共 9 個測試與假計時器）。
 - 驗證（本機離線）：`node --test tests/js/` 127 passed；pytest 760 passed、54 skipped；`check_project.py` PASS。未驗：真實瀏覽器／手機、真實 API。
+
+## 2026-11-02 Claude：前台發票列表接真實 API
+
+- 問題：列表頁是舊骨架（舊 5 種狀態、`invoice.id`、`risk_score`），與真實 API 與九種簽核狀態不符。
+- 處理檔案：`app/clients/invoices.py`（`fetch_invoices` 契約檢查）、`app/utils/invoice_list_view.py`（新）、`app/routers/invoices.py`（`invoice_list`）、`app/templates/pages/invoices/list.html`、`tests/unit/test_invoice_list.py`（新，45 個）、`tests/unit/test_pages.py`（兩個既有列表測試改為新契約）。
+- 驗證：pytest 1023 passed、54 skipped；node 127 passed；ruff、djlint、check_project 通過。另以隔離 PostgreSQL（TLS）＋本機 API／前台程序經真實 HTTP 驗證：真實登入、25 筆分兩頁（20＋5）、approved 篩選 5 筆、非法狀態視為全部、超出最後一頁訊息、他人只見自己的 3 筆且開不了別人的詳情（404）、無效 Cookie 導向登入、API 直連非法 status 與 page_size=101 回 422、無 idle in transaction。未驗：正式環境、部署、手機瀏覽器。

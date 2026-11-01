@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.clients import invoices as invoices_client
 from app.clients.base import ApiError
-from app.constants import INVOICE_FLOW_STEPS, INVOICE_STATUS_LABEL
+from app.constants import INVOICE_FLOW_STEPS
 from app.core.config import settings
 from app.core.deps import AccessToken
 from app.core.security import verify_same_origin
@@ -28,8 +28,13 @@ from app.routers.auth import require_session
 from app.utils.demo_invoice import DEMO_INVOICE_ID, build_demo_invoice
 from app.utils.invoice_confirmation import build_confirmation_view
 from app.utils.invoice_detail_adapter import InvoiceDetailFormatError, adapt_invoice_detail
+from app.utils.invoice_list_view import build_list_view, normalize_status, status_options
 
 # 全部發票頁面需登入：每次經 API 核對 Session
+# 列表每頁筆數；頁碼上限與 API 的 PageNumber（10000）一致
+LIST_PAGE_SIZE = 20
+MAX_LIST_PAGE = 10_000
+
 router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(require_session)])
 
 # 手機上傳影像上限：與 API 相同（Vercel 請求本文上限 4.5 MB），頁面會先縮圖
@@ -94,17 +99,21 @@ def _build_user_flow_steps(current_step: int, invoice_id: int) -> list[dict[str,
 async def invoice_list(
     request: Request,
     token: AccessToken,
-    page: Annotated[int, Query(ge=1)] = 1,
+    page: Annotated[int, Query(ge=1, le=MAX_LIST_PAGE)] = 1,
     status: str | None = None,
 ) -> HTMLResponse:
-    """我的發票列表：分頁、依狀態篩選。"""
-    # 不認得的狀態值視為「全部」，避免把任意字串傳給 API
-    status = status if status in INVOICE_STATUS_LABEL else None
-    result = await invoices_client.fetch_invoices(token, page=page, status=status)
+    """我的發票列表（只含本人提交）：分頁、依九種簽核狀態篩選。
+
+    API 失敗或回應不合法時由全域處理器回錯誤頁（401 導向登入），不顯示假資料。
+    """
+    status = normalize_status(status)
+    result = await invoices_client.fetch_invoices(
+        token, page=page, page_size=LIST_PAGE_SIZE, status=status
+    )
     return templates.TemplateResponse(
         request,
         "pages/invoices/list.html",
-        {"result": result, "status": status},
+        {"view": build_list_view(result), "status": status, "status_options": status_options()},
     )
 
 

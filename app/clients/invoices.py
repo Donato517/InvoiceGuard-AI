@@ -3,8 +3,8 @@
 功能說明：發票相關 API——手機上傳流程（辨識、必填檢核、查重、送出）、詳情、列表、上傳、重新分析。
     對應 API 路徑：/api/v1/invoices
 注意事項：
-    - 手機上傳流程與詳情（GET /invoices/{id}，Stage 1）已由 API 實作；列表、上傳與重新分析的 API 端點仍為 TODO。
-    - fetch_invoice 會驗證詳情回應的型別與巢狀形狀，不符一律 502，不把不合法的資料交給畫面。
+    - 手機上傳流程與詳情（GET /invoices/{id}，Stage 1）已由 API 實作；列表（GET /invoices，只含本人提交）已由 API 實作；上傳與重新分析的 API 端點仍為 TODO。
+    - fetch_invoices、fetch_invoice 會驗證列表與詳情回應的型別與巢狀形狀，不符一律 502，不把不合法的資料交給畫面。
 """
 
 import json
@@ -122,21 +122,91 @@ async def submit_invoice(token: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def fetch_invoices(
     token: str, *, page: int = 1, page_size: int = 20, status: str | None = None
 ) -> dict[str, Any]:
-    """取得我的發票列表（GET /invoices）。
+    """取得我的發票列表（GET /invoices）：只含提交者本人的發票，最新送出在前。
 
     Args:
         token: 使用者的 access token。
         page: 頁碼，從 1 開始。
-        page_size: 每頁筆數（上限 100）。
-        status: 依狀態篩選，值見 app.constants.INVOICE_STATUS_LABEL 的鍵；None 表示全部。
+        page_size: 每頁筆數（1～100）。
+        status: 簽核狀態代碼（見 app.utils.invoice_status.APPROVAL_STATUS_LABEL 的鍵）；None 表示全部。
 
     Returns:
-        {"items": [...], "total": int, "page": int, "page_size": int}
+        已通過形狀檢查的分頁結果：{"items": [...], "total": int, "page": int, "page_size": int}；
+        每筆含 invoice_id、status、submission_round、submitted_at、invoice_track、invoice_number、
+        invoice_date、seller_name、total_amount（金額為字串）。
+
+    Raises:
+        ApiError: API 錯誤（401、422、5xx）、連線失敗（503），或 API 回 2xx 但本文不是合法 JSON、
+            型別或形狀不符、回傳的 page／page_size 與請求不同時為 502 INVALID_UPSTREAM_RESPONSE
+            （不含原始本文）。
     """
     params: dict[str, Any] = {"page": page, "page_size": page_size}
     if status:
         params["status"] = status
-    return await request_json("GET", "/invoices", token=token, params=params)
+    try:
+        result = await request_json("GET", "/invoices", token=token, params=params)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("發票列表的 API 回應不是合法 JSON（%s）", exc.__class__.__name__)
+        raise _invalid_upstream_response() from exc
+    reason = _list_violation(result, page, page_size)
+    if reason is not None:
+        # 只記錄固定的原因代碼，不記錄回應內容
+        logger.warning("發票列表的 API 回應不符契約：%s", reason)
+        raise _invalid_upstream_response()
+    return result
+
+
+_LIST_TEXT_KEYS = (
+    "submitted_at",
+    "invoice_track",
+    "invoice_number",
+    "invoice_date",
+    "seller_name",
+    "total_amount",
+)
+
+
+def _is_uuid_text(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(UUID(value)) == value.lower()
+    except ValueError:
+        return False
+
+
+def _list_violation(result: Any, page: int, page_size: int) -> str | None:
+    """檢查列表回應；回傳固定的原因代碼，合法時回傳 None。
+
+    只檢查畫面會用到的型別；狀態代碼不在此限制為九種（未知代碼由畫面標示「未知狀態」）。
+    """
+    if not isinstance(result, dict):
+        return "result_not_object"
+    items = result.get("items")
+    if not isinstance(items, list):
+        return "items_not_list"
+    total = result.get("total")
+    if not _is_int(total) or total < 0:
+        return "total_invalid"
+    if result.get("page") != page or not _is_int(result.get("page")):
+        return "page_mismatch"
+    if result.get("page_size") != page_size or not _is_int(result.get("page_size")):
+        return "page_size_mismatch"
+    if len(items) > min(page_size, total):
+        return "items_exceed_page"
+    for entry in items:
+        if not isinstance(entry, dict):
+            return "item_not_object"
+        if not _is_uuid_text(entry.get("invoice_id")):
+            return "item_invoice_id_invalid"
+        if not isinstance(entry.get("status"), str):
+            return "item_status_invalid"
+        round_no = entry.get("submission_round")
+        if not _is_int(round_no) or round_no < 0:
+            return "item_round_invalid"
+        if any(not _is_text_or_none(entry.get(key)) for key in _LIST_TEXT_KEYS):
+            return "item_text_invalid"
+    return None
 
 
 async def fetch_invoice(token: str, invoice_id: str) -> dict[str, Any]:
