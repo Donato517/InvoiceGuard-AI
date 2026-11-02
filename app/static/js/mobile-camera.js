@@ -83,7 +83,11 @@
     ['zero_rated', '零稅率'],
     ['tax_exempt', '免稅'],
   ];
-  const STATUS_LABELS = { pending_department_approval: '待單位核准' };
+  // 首次提交狀態：新案為 pending_accounting_review；舊案仍為 pending_department_approval，兩者不混用標籤
+  const STATUS_LABELS = {
+    pending_accounting_review: '待會計覆核',
+    pending_department_approval: '待單位核准',
+  };
   // API 提醒的欄位 → 畫面上的輸入欄位
   const WARNING_TARGETS = { tax_period: 'invoice_date' };
   // 欄位格式與送出前的資料整理放在 invoice-field-rules.js（純函式，格式須與 API 相同），這裡與格式提示共用
