@@ -92,7 +92,7 @@
   <div class="mobile-card">
     <span class="mobile-step-pill">步驟 4：查重後確認上傳</span>
     <h2 class="mobile-card__title">查重與最後確認</h2>
-    <p class="mobile-card__desc">資料尚未送出；查重通過並確認後才建立發票（待單位核准）。辨識後 1 小時內需送出。</p>
+    <p class="mobile-card__desc">資料尚未送出；查重通過並確認後才建立發票。辨識後 1 小時內需送出。</p>
     <div class="card">
       <p>
         字軌號碼：<strong id="sum-invoice-no"></strong>
@@ -147,12 +147,12 @@
         影像方向校正：<strong id="success-rotation">0°</strong>
       </p>
       <p>
-        案件狀態：<strong id="success-status">待單位核准</strong>
+        案件狀態：<strong id="success-status">已送出</strong>
       </p>
       <p>
         使用者修改欄位：<strong id="success-modified"></strong>
       </p>
-      <p class="muted">發票資料與辨識時的{{ "檔案" if upload_mode == "file" else "影像" }}已送出，等待請款單位核准。</p>
+      <p class="muted">發票資料與辨識時的{{ "檔案" if upload_mode == "file" else "影像" }}已送出，可至「我的發票」查看最新審核狀態。</p>
     </div>
     <div id="success-warnings" class="alert alert--warning" hidden>
       <p>系統檢核提醒（已記錄，審核時確認）：</p>
