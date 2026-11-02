@@ -51,6 +51,8 @@
   position: absolute;
   left: 0;
   top: 0;
+  max-width: none;
+  max-height: none;
   overflow: visible;
 }
 
@@ -679,9 +681,16 @@
 .mobile-actions {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   margin-top: 16px;
+}
+
+.mobile-actions__right {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .mobile-step-pill {

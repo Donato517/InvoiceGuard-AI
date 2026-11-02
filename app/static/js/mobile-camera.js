@@ -361,11 +361,15 @@
     const svg = $('#fieldSvg');
     if (svg) {
       if (portrait) {
+        svg.style.maxWidth = 'none';
+        svg.style.maxHeight = 'none';
         svg.style.width = gh + 'px';
         svg.style.height = gw + 'px';
         svg.style.transformOrigin = '0 0';
         svg.style.transform = 'translate(' + gw + 'px,0) rotate(90deg)';
       } else {
+        svg.style.maxWidth = '100%';
+        svg.style.maxHeight = '100%';
         svg.style.width = '100%';
         svg.style.height = '100%';
         svg.style.transform = 'none';
@@ -505,7 +509,7 @@
         '【外框對齊指南】\n' +
           '1. 只需對齊整張紙的外邊框。內部欄位是位置參考，不影響紅綠燈。\n' +
           '2. 綠框表示四邊位置及角度接近拍攝框，並連續穩定。\n' +
-          '3. 輸出保留完整相機影像，不裁切。\n' +
+          '3. 輸出依外框自動裁切，保留清晰發票影像。\n' +
           '4. 拍照後可於預覽頁自由旋轉方向（左轉、右轉 90°）及還原原圖。'
       );
     };
@@ -520,11 +524,32 @@
 
     $('#shutter').onclick = function () {
       const v = $('#liveCamera');
-      if (!v || !v.videoWidth) return;
+      const stage = $('#cameraStage');
+      const g = $('#alignGuide');
+      if (!v || !v.videoWidth || !stage || !g) return;
+
+      const sw = stage.clientWidth;
+      const sh = stage.clientHeight;
+      const scale = Math.max(sw / v.videoWidth, sh / v.videoHeight);
+      const vw = v.videoWidth * scale;
+      const vh = v.videoHeight * scale;
+      const vx = (sw - vw) / 2;
+      const vy = (sh - vh) / 2;
+
+      const gx = parseFloat(g.dataset.x ?? g.offsetLeft);
+      const gy = parseFloat(g.dataset.y ?? g.offsetTop);
+      const gw = parseFloat(g.dataset.w ?? g.offsetWidth);
+      const gh = parseFloat(g.dataset.h ?? g.offsetHeight);
+
+      const cropX = Math.max(0, Math.min(v.videoWidth - 1, (gx - vx) / scale));
+      const cropY = Math.max(0, Math.min(v.videoHeight - 1, (gy - vy) / scale));
+      const cropW = Math.max(1, Math.min(v.videoWidth - cropX, gw / scale));
+      const cropH = Math.max(1, Math.min(v.videoHeight - cropY, gh / scale));
+
       const c = document.createElement('canvas');
-      c.width = v.videoWidth;
-      c.height = v.videoHeight;
-      c.getContext('2d').drawImage(v, 0, 0);
+      c.width = Math.round(cropW);
+      c.height = Math.round(cropH);
+      c.getContext('2d').drawImage(v, cropX, cropY, cropW, cropH, 0, 0, c.width, c.height);
       const url = c.toDataURL('image/jpeg', 0.9);
       setImage({
         image: url,
@@ -1056,6 +1081,12 @@
       if (isComposing(control, event)) return;
       normalizeControl(control, field, event);
       markHeaderField(field);
+      if (field === 'buyer_tax_id' && control.value.trim() !== '') {
+        control.classList.remove('is-invalid', 'is-missing');
+        control.removeAttribute('aria-invalid');
+        const err = $('#err-buyer-tax-id');
+        if (err) err.remove();
+      }
       if (field === 'invoice_date') updateFutureDateWarning();
       syncDerivedFields(field);
     };
@@ -1065,6 +1096,12 @@
       normalizeControl(control, field);
       recordEdit('header', null, field, control.value);
       markHeaderField(field);
+      if (field === 'buyer_tax_id' && control.value.trim() !== '') {
+        control.classList.remove('is-invalid', 'is-missing');
+        control.removeAttribute('aria-invalid');
+        const err = $('#err-buyer-tax-id');
+        if (err) err.remove();
+      }
       if (field === 'invoice_date') updateFutureDateWarning();
       syncDerivedFields(field);
     });
@@ -2190,7 +2227,39 @@
     const btnRecognize = $('#btn-recognize');
     if (btnRecognize) btnRecognize.onclick = () => recognizeCurrentImage(btnRecognize);
 
-    // 6. 核對修正完成
+    // 6. 再辨識與核對修正完成
+    const btnReRecognize = $('#btn-re-recognize');
+    if (btnReRecognize) {
+      btnReRecognize.onclick = function () {
+        const input = $('#f-buyer_tax_id');
+        if (!input) return;
+        const val = input.value.trim();
+        const existingErr = $('#err-buyer-tax-id');
+        if (!val) {
+          input.classList.add('is-invalid', 'is-missing');
+          input.setAttribute('aria-invalid', 'true');
+          if (!existingErr) {
+            const err = make('small', { class: 'field-missing', id: 'err-buyer-tax-id' }, '請輸入買受人統一編號');
+            input.after(err);
+          } else {
+            existingErr.textContent = '請輸入買受人統一編號';
+            existingErr.hidden = false;
+          }
+          alert('請先填寫買受人統一編號！');
+          input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          input.focus();
+          return;
+        }
+        input.classList.remove('is-invalid', 'is-missing');
+        input.removeAttribute('aria-invalid');
+        if (existingErr) existingErr.remove();
+        const confirmed = window.confirm('請確認買受人統一編號：' + val + ' 是否正確？');
+        if (confirmed) {
+          // 後續辨識邏輯預留此處寫入
+        }
+      };
+    }
+
     const btnConfirmFields = $('#btn-confirm-fields');
     if (btnConfirmFields) {
       const confirmLabel = btnConfirmFields.textContent;
