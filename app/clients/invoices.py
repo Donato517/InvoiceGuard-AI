@@ -363,3 +363,45 @@ async def upload_invoice(
 async def analyze_invoice(token: str, invoice_id: int) -> dict[str, Any]:
     """重新觸發 AI 分析（POST /invoices/{id}/analyze）。"""
     return await request_json("POST", f"/invoices/{invoice_id}/analyze", token=token)
+
+
+async def fetch_return_items(token: str, invoice_id: str) -> dict[str, Any]:
+    """讀取退回補正所需資料（GET /invoices/{id}/return-items）：退件項目、可修改欄位、上一輪正式提交資料。
+
+    Raises:
+        ApiError: 案件不存在或不是本人（404）、不是退回狀態（409）、其他 API 錯誤；回應形狀不符時為 502。
+    """
+    result = await request_json("GET", f"/invoices/{invoice_id}/return-items", token=token)
+    if not isinstance(result, dict) or not isinstance(result.get("previous"), dict):
+        raise _invalid_upstream_response()
+    if not isinstance(result.get("return_items"), list) or not isinstance(
+        result.get("editable_fields"), list
+    ):
+        raise _invalid_upstream_response()
+    return result
+
+
+async def void_invoice(token: str, invoice_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """申請人作廢被退回的案件（POST /invoices/{id}/void）：只轉換狀態，保留案件與影像；之後重新上傳建立新案件。
+
+    Raises:
+        ApiError: 非原提交者（404）、已不是退回狀態或輪次過期（409）等 API 錯誤。
+    """
+    result = await request_json("POST", f"/invoices/{invoice_id}/void", token=token, json=payload)
+    if not isinstance(result, dict) or result.get("status") != "voided":
+        raise _invalid_upstream_response()
+    return result
+
+
+async def resubmit_invoice(token: str, invoice_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """同案重送（POST /invoices/{id}/resubmit）：原樣轉送瀏覽器收集的欄位、編輯事件與回覆，規則全部由 API 決定。
+
+    Raises:
+        ApiError: 權限（404）、輪次過期／圖片問題／重複（409）、欄位未授權或回覆不完整（400）、格式錯誤（422）等。
+    """
+    result = await request_json(
+        "POST", f"/invoices/{invoice_id}/resubmit", token=token, json=payload
+    )
+    if not isinstance(result, dict):
+        raise _invalid_upstream_response()
+    return result

@@ -239,6 +239,49 @@ async def mobile_upload_submit(payload: MobileUploadRequest, token: AccessToken)
     return await invoices_client.submit_invoice(token, payload.model_dump())
 
 
+@router.get("/{invoice_id}/correct", response_class=HTMLResponse)
+async def invoice_correct_page(
+    request: Request, token: AccessToken, invoice_id: str
+) -> HTMLResponse:
+    """退回補正頁：原提交者讀取退件項目與上一輪正式提交資料，只開放財務授權的欄位（不重新辨識、不換影像）。"""
+    normalized_id = _normalize_detail_id(invoice_id)
+    info = await invoices_client.fetch_return_items(token, normalized_id)
+    editable = {
+        f"{ref['field_scope']}|{ref.get('item_id') or ''}|{ref['field_name']}"
+        for ref in info["editable_fields"]
+    }
+    return templates.TemplateResponse(
+        request,
+        "pages/invoices/correct.html",
+        {
+            "invoice_id": normalized_id,
+            "info": info,
+            "previous": info["previous"],
+            "editable": editable,
+            "field_items": [i for i in info["return_items"] if i.get("item_kind") == "field"],
+            "other_items": [i for i in info["return_items"] if i.get("item_kind") != "field"],
+        },
+    )
+
+
+@router.post(
+    "/{invoice_id}/correct", dependencies=[Depends(verify_same_origin)], response_model=None
+)
+async def invoice_correct_submit(
+    token: AccessToken, invoice_id: str, payload: Annotated[dict[str, Any], Body()]
+) -> dict[str, Any]:
+    """正式重送：把補正頁收集的欄位、完整編輯事件（editLog）與回覆經 API 一次保存；錯誤由全域處理器轉為 JSON。"""
+    return await invoices_client.resubmit_invoice(token, _normalize_detail_id(invoice_id), payload)
+
+
+@router.post("/{invoice_id}/void", dependencies=[Depends(verify_same_origin)], response_model=None)
+async def invoice_void_submit(
+    token: AccessToken, invoice_id: str, payload: Annotated[dict[str, Any], Body()]
+) -> dict[str, Any]:
+    """申請人作廢被退回的案件（圖片問題的必經步驟）；成功後前端引導使用者重新上傳，會建立新案件。"""
+    return await invoices_client.void_invoice(token, _normalize_detail_id(invoice_id), payload)
+
+
 def _normalize_detail_id(invoice_id: str) -> str:
     """詳情 ID：只接受 UUID（API 只收 UUID）；其他一律 404，不把任意字串轉給 API。
 
@@ -289,6 +332,7 @@ async def invoice_detail(request: Request, token: AccessToken, invoice_id: str) 
         "pages/invoices/detail.html",
         {
             "invoice_id": normalized_id,
+            "can_correct": raw.get("status") == "returned_to_applicant",
             "view": build_confirmation_view(invoice),
             "is_demo": False,
         },
