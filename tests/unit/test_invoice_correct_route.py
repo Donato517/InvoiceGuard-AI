@@ -243,3 +243,31 @@ def test_image_problem_page_offers_void_and_reupload_links(
         and "/invoices/mobile-upload" in html
         and "/invoices/upload" in html
     )
+
+
+def test_other_kind_return_shows_reason_and_limit_without_form_or_void(
+    logged_in_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """other 類型不當成圖片問題：顯示財務原因與處理限制，不提供補正表單，也不提供作廢入口。"""
+    info = _info(
+        can_resubmit=False,
+        requires_void=False,
+        resubmit_blocked_reason="尚無可補正或申覆的欄位退件項目",
+        editable_fields=[],
+        return_items=[
+            {
+                "return_item_id": RETURN_ITEM,
+                "item_kind": "other",
+                "target": None,
+                "reason": "請洽財務說明",
+                "allowed_fields": [],
+                "status": "open",
+            }
+        ],
+    )
+    install_mock_api(monkeypatch, lambda request: httpx.Response(200, json=info))
+
+    html = logged_in_client.get(f"/invoices/{ID}/correct").text
+
+    assert "請洽財務說明" in html and "data-other-limit" in html and "data-resubmit-blocked" in html
+    assert 'id="correct-form"' not in html and 'id="void-button"' not in html
