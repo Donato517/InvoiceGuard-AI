@@ -71,6 +71,7 @@
   <section class="field-block" aria-label="案件資訊" data-invoice-header="true">
     <p class="field-block__value">發票 ID：<span data-header="invoice-id">{{ view.header.invoice_id }}</span></p>
     <p class="field-block__value">
+      {% if can_correct %}<a class="btn btn--primary" data-correct-link href="/invoices/{{ invoice_id }}/correct">補正退回項目</a>{% endif %}
       案件狀態：{% set tone = STATUS_TONE.get(view.header.status.code, "unknown") if view.header.status.known else "unknown" %}<span class="idt-badge idt-badge--{{ tone }}" data-status-tone="{{ tone }}" data-header="status" data-status-known="{{ 'true' if view.header.status.known else 'false' }}">{{ view.header.status.label }}</span>
       {% if view.header.status.code and view.header.status.known %}<code>{{ view.header.status.code }}</code>{% endif %}
     </p>

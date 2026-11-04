@@ -43,3 +43,7 @@ C 組第一批 UX 合併後修正（2026-11-01，分支 feature/c-ux-field-check
 
 我的發票列表（2026-11-02，分支 feature/c-invoice-list-frontend）：`GET /invoices` 經 `invoices_client.fetch_invoices` 讀後端 `GET /api/v1/invoices`（只含提交者本人），client 驗證回應契約（UUID、狀態字串、輪次、分頁數字與請求一致，不符 502），畫面使用九種簽核狀態（`app/utils/invoice_status.py`）、UUID 連到詳情頁、不顯示風險分數；空列表、篩選無資料、超出最後一頁、未登入（導向登入）、API 失敗（錯誤頁）皆有處理。非法狀態視為「全部」，不轉送 API。共用常數 `INVOICE_STATUS_LABEL`（舊 5 種）不再供列表使用，但未修改。範圍僅限本人提交的發票，不含同部門列表。
 驗證：Mock 單元測試通過；以隔離 PostgreSQL 15（Schema v1.8 去除 pgvector、啟用自簽 TLS）＋本機 API 程序＋本機前台程序，經真實 HTTP 與真實登入驗證列表、分頁、篩選、他人隔離與詳情連結。未對正式 DB／部署環境／手機瀏覽器驗證。
+
+退回補正頁（2026-11-03，分支 feature/resubmit-frontend，**尚未 Commit／Push／Merge**）：詳情頁對 `returned_to_applicant` 顯示「補正退回項目」；`GET /invoices/{uuid}/correct` 經 API `return-items` 以上一輪正式提交資料預填（不重新辨識、不換影像），只開放 API 回傳的可修改欄位；`invoice-correct.js` 收集逐次修改事件（editLog，起點為上一輪值），正式重送時經 `POST /invoices/{uuid}/correct` 轉送 API `resubmit` 一次保存；逾時以相同冪等識別碼重試；有圖片問題只顯示「須作廢後重新上傳」。申請人作廢入口尚未提供（API 尚無端點）。驗證：單元測試（Mock 傳輸）；另以瀏覽器實際操作補正頁（本機隔離 PostgreSQL＋真實 API／ADMIN）完成一次重送與一次冪等重試。未驗證：手機瀏覽器、正式環境、API 錯誤碼在畫面的各種呈現。
+
+圖片退件作廢（2026-11-03，分支 feature/resubmit-frontend，**尚未 Commit**）：補正頁在圖片問題時提供「作廢此案件並重新上傳」，經前台 `POST /invoices/{uuid}/void` 呼叫 API 作廢（僅原提交者），成功後連到既有的手機／電腦上傳頁重新辨識與首次提交（新案件、新 invoice_id）。已以瀏覽器在本機隔離環境操作；OCR 以辨識紀錄替身取代。
