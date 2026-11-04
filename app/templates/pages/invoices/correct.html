@@ -36,7 +36,14 @@
         已作廢。請重新上傳：<a href="/invoices/mobile-upload">手機拍照上傳</a>　<a href="/invoices/upload">電腦上傳</a>
       </p>
     {% elif not info.can_resubmit %}
-      <p class="alert alert--info">{{ info.resubmit_blocked_reason or "目前不能補正" }}</p>
+      <section aria-label="退回原因">
+        <h2>財務退回原因</h2>
+        <ul id="return-reasons">{% for item in info.return_items %}<li>{{ item.reason }}</li>{% endfor %}</ul>
+      </section>
+      <p class="alert alert--info" data-resubmit-blocked>{{ info.resubmit_blocked_reason or "目前不能補正" }}</p>
+      {% if other_items %}
+        <p data-other-limit>這類退回（非欄位、非圖片問題）目前沒有核定的自助處理方式：不能在原案件補正或申覆，也不會自動視為圖片問題。請聯絡財務人員確認處理方式。</p>
+      {% endif %}
     {% else %}
       <section aria-label="退回原因">
         <h2>財務退回原因</h2>

@@ -47,3 +47,5 @@ C 組第一批 UX 合併後修正（2026-11-01，分支 feature/c-ux-field-check
 退回補正頁（2026-11-03，分支 feature/resubmit-frontend，**尚未 Commit／Push／Merge**）：詳情頁對 `returned_to_applicant` 顯示「補正退回項目」；`GET /invoices/{uuid}/correct` 經 API `return-items` 以上一輪正式提交資料預填（不重新辨識、不換影像），只開放 API 回傳的可修改欄位；`invoice-correct.js` 收集逐次修改事件（editLog，起點為上一輪值），正式重送時經 `POST /invoices/{uuid}/correct` 轉送 API `resubmit` 一次保存；逾時以相同冪等識別碼重試；有圖片問題只顯示「須作廢後重新上傳」。申請人作廢入口尚未提供（API 尚無端點）。驗證：單元測試（Mock 傳輸）；另以瀏覽器實際操作補正頁（本機隔離 PostgreSQL＋真實 API／ADMIN）完成一次重送與一次冪等重試。未驗證：手機瀏覽器、正式環境、API 錯誤碼在畫面的各種呈現。
 
 圖片退件作廢（2026-11-03，分支 feature/resubmit-frontend，**尚未 Commit**）：補正頁在圖片問題時提供「作廢此案件並重新上傳」，經前台 `POST /invoices/{uuid}/void` 呼叫 API 作廢（僅原提交者），成功後連到既有的手機／電腦上傳頁重新辨識與首次提交（新案件、新 invoice_id）。已以瀏覽器在本機隔離環境操作；OCR 以辨識紀錄替身取代。
+
+`other` 類退回（2026-11-04，分支 feature/e2e-integration-verify，未 Commit）：補正頁在 `can_resubmit=false` 時顯示財務退回原因與處理限制（非欄位、非圖片問題不能補正／申覆，也不當成圖片問題；沒有作廢入口），並新增單元測試。`other` 是否允許申請人作廢仍待團隊決議（API 目前允許任何 `returned_to_applicant` 案件由原提交者作廢）。
