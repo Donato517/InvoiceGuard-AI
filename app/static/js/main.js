@@ -15,3 +15,39 @@ document.addEventListener('submit', (event) => {
     event.preventDefault()
   }
 })
+
+/**
+ * 登入表單：送出時將登入按鈕轉為載入旋轉圈狀態。
+ */
+document.addEventListener('submit', (event) => {
+  const form = event.target
+  if (
+    form &&
+    form.getAttribute('action') === '/login' &&
+    !event.defaultPrevented
+  ) {
+    const submitBtn = form.querySelector('button[type="submit"]')
+    if (submitBtn) {
+      submitBtn.classList.add('btn--loading')
+      submitBtn.setAttribute('aria-busy', 'true')
+      submitBtn.innerHTML = '<span class="btn__spinner" aria-hidden="true"></span>登入中…'
+      setTimeout(() => {
+        submitBtn.disabled = true
+      }, 0)
+    }
+  }
+})
+
+window.addEventListener('pageshow', () => {
+  const loginForm = document.querySelector('form[action="/login"]')
+  if (loginForm) {
+    const loginBtn = loginForm.querySelector('button[type="submit"]')
+    if (loginBtn && loginBtn.classList.contains('btn--loading')) {
+      loginBtn.classList.remove('btn--loading')
+      loginBtn.removeAttribute('aria-busy')
+      loginBtn.disabled = false
+      loginBtn.textContent = '登入'
+    }
+  }
+})
+
