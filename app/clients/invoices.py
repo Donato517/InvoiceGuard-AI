@@ -12,11 +12,23 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from app.clients.base import ApiError, request_json
+from app.clients.base import ApiError, request_image, request_json
 
 logger = logging.getLogger(__name__)
 
 INVALID_UPSTREAM_RESPONSE_MESSAGE = "服務回應異常，請稍後再試"
+
+
+async def showcase_references(token: str, tax_id: str, layout: str = "") -> list[dict[str, Any]]:
+    """依供應商查詢啟用範例；不取得管理權或範例草稿。"""
+    return await request_json(
+        "GET", "/showcase-references", token=token, params={"tax_id": tax_id, "layout": layout}
+    )
+
+
+async def showcase_image(token: str, sample: str, revision: str) -> tuple[bytes, str]:
+    """由伺服器轉送 Session，不在瀏覽器公開 Token 或物件路徑。"""
+    return await request_image(f"/showcase-references/{sample}/{revision}/file", token=token)
 
 
 async def recognize_invoice(

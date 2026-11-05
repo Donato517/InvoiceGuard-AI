@@ -942,3 +942,12 @@ STARTUP 42 筆清單只在讀取時處理 CRLF 並核對路徑與雜湊，原檔
 - GitHub Ubuntu CI 的登出清除 Cookie 測試因未模擬 API 登出而觸發既有網路阻擋；補上非同步替身並驗證合成 Session 的撤銷呼叫，不修改正式登出功能或封網 fixture。
 - Windows 一般使用者權限重跑：pytest 397 passed、54 skipped、1 個既有 TestClient／httpx warning；跨站 check_project、Ruff check／format、environment 靜態檢查均通過；djLint 25 樣板、0 errors。所有暫存與報告放在專案外，沒有連正式服務。
 - GitHub Linux／Windows 檢查以 [PR #5 的 CI 結果](https://github.com/Donato517/InvoiceGuard-AI/pull/5/checks) 為準。
+
+## 2026-11-06 Show Case 交付
+
+原因：上傳核對需要可追溯的供應商範例，但範例不應直接改寫本次發票，也不應另建第二份供應商主檔。
+結論：ADMIN 維護與人工確認、API 提供有效範例、前台另開唯讀參考。新範例綁定正式供應商，原圖與歷程保留；逐次驗權、版本衝突、來源 SHA-256 與失敗回滾由既有分層處理。正式發票換算／檢核流程保留。
+界線：結構版本檔是待 DB 負責人審查的定義，沒有套用正式 migration。正式範例表與私有歷程擴充須依團隊手動 SQL 流程核對；無權限或缺表時拒絕，不以假成功取代。模型比較、真實角色與 Storage、獨立 PostgreSQL 多連線及 Preview 仍待驗收。
+說明見 FEATURE-DELIVERY-20261106.md；提交前的實際驗證結果另補 TEST_REPORT。
+
+交付驗證（2026-11-06）：完整 pytest 1040 passed、54 skipped（180.94 秒），1 個既有 Starlette 警告；check_project --project-root ..、Ruff lint／69 檔格式、28 份樣板 djLint 通過。跳過案例仍未驗收。
