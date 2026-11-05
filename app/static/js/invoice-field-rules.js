@@ -78,34 +78,49 @@
   }
 
   // ---- 國字大寫建議值（辨識完成當下）----
-  // 判斷只依 API 的警示：國字無法判讀（total_amount_zh_unreadable）或 AI 沒有辨識到國字（空白），且數字總計是合法整數，
-  // 才依總計帶入標準國字；可解析但與總計不符（mismatch）只提示、不自動覆寫。容錯解析一致的國字（API 無警示）不處理。
+  // 總計必須是合法整數；API 回報 total_amount_zh_mismatch（可解析但與總計不符）時絕不覆寫，只留警示。
+  // 帶入條件：國字無法判讀（total_amount_zh_unreadable）、AI 沒辨識到（空白），或 AI 字串可解析且與總計一致
+  // 但寫法與標準國字不同（例如保留預印單位空位「億仟佰拾壹萬…」，kind = nonstandard）。
+  // 只差結尾「整」字或空白不算不標準。AI 原字串保留在辨識結果與提醒文字中。
   var ZH_ORIGINAL_MAX = 60;
+
+  function zhCore(text) {
+    var compact = String(text).replace(/\s+/g, '');
+    return compact.slice(-1) === '整' ? compact.slice(0, -1) : compact;
+  }
 
   /**
    * 辨識結果是否需要自動帶入國字建議值。
    * @param {{invoice: Object, warnings: Array}} recognition API 辨識回應。
-   * @returns {{value: string, original: string}|null} value 為標準國字；original 為 AI 原始國字（空白為 ''）；不需要時 null。
+   * @returns {{value: string, original: string, kind: string}|null} value 為標準國字；original 為 AI 原始國字（空白為 ''）；
+   *   kind：unreadable｜blank｜nonstandard；不需要時 null。
    */
   function zhSuggestionFor(recognition) {
     var invoice = (recognition && recognition.invoice) || {};
     var warnings = (recognition && recognition.warnings) || [];
     var original = String(invoice.total_amount_zh === null || invoice.total_amount_zh === undefined ? '' : invoice.total_amount_zh).trim();
-    var unreadable = warnings.some(function (w) {
-      return w && w.field === 'total_amount_zh' && w.code === 'total_amount_zh_unreadable';
-    });
-    if (!unreadable && original !== '') return null;
+    function has(code) {
+      return warnings.some(function (w) {
+        return w && w.field === 'total_amount_zh' && w.code === code;
+      });
+    }
+    if (has('total_amount_zh_mismatch')) return null;
     var value = amountToChinese(invoice.total_amount);
-    return value ? { value: value, original: original } : null;
+    if (!value) return null;
+    if (has('total_amount_zh_unreadable')) return { value: value, original: original, kind: 'unreadable' };
+    if (original === '') return { value: value, original: original, kind: 'blank' };
+    if (zhCore(original) === zhCore(value)) return null;
+    return { value: value, original: original, kind: 'nonstandard' };
   }
 
   /** 自動帶入後給上傳者的核對提醒（純文字；原值過長只顯示前段）。 */
   function zhSuggestionText(suggestion) {
     var original = suggestion.original;
     var shown = original.length > ZH_ORIGINAL_MAX ? original.slice(0, ZH_ORIGINAL_MAX) + '…' : original;
-    var head = original
-      ? 'AI 辨識的國字大寫「' + shown + '」無法判讀，'
-      : 'AI 沒有辨識到國字大寫金額，';
+    var head;
+    if (suggestion.kind === 'blank' || !original) head = 'AI 沒有辨識到國字大寫金額，';
+    else if (suggestion.kind === 'nonstandard') head = 'AI 辨識的國字大寫「' + shown + '」寫法不標準（可對應總計），';
+    else head = 'AI 辨識的國字大寫「' + shown + '」無法判讀，';
     return head + '已依總計自動帶入「' + suggestion.value + '」，請對照原始發票核對。';
   }
 
@@ -263,9 +278,9 @@
    * 判斷單一欄位目前輸入的格式提示。
    * @param {string} field 欄位名稱（同 API）。
    * @param {string} raw 輸入框目前的原始內容（不整理、不修改）。
-   * @returns {{state: string, message: string, note?: string}} note 為統編檢查碼不符的提示（不影響 state）；state：
+   * @returns {{state: string, message: string, note?: string}} 統編格式正確但檢查碼不符時 state 為 warning（只提醒，不阻擋送出）並附 note；state：
    *   none（此欄位沒有明確格式規則，不顯示提示）、empty（尚未填寫，保持中性）、
-   *   ok（格式正確）、compatible（格式相容，既有整理後符合）、error（格式錯誤，message 為原因）。
+   *   ok（格式正確）、compatible（格式相容，既有整理後符合）、warning（格式符合但檢查碼不符）、error（格式錯誤，message 為原因）。
    */
   function evaluateField(field, raw) {
     var text = raw === null || raw === undefined ? '' : String(raw);
@@ -284,9 +299,9 @@
     else if (rule.re.test(cleaned) && (!rule.preserved || rule.preserved(text))) {
       result = { state: 'compatible', message: '格式相容，可送出' };
     } else return { state: 'error', message: rule.message(cleaned) };
-    // 統編格式通過後再看檢查碼：state 不變（仍可送出），另附 note 供畫面提示
+    // 統編格式通過後再看檢查碼：不符時改為 warning（不顯示綠勾、仍可送出），note 提醒通過不代表公司存在
     if ((field === 'seller_tax_id' || field === 'buyer_tax_id') && !validTaxId(cleaned)) {
-      result.note = TAX_ID_CHECKSUM_NOTE;
+      return { state: 'warning', message: '檢查碼不符，請確認', note: TAX_ID_CHECKSUM_NOTE };
     }
     return result;
   }
@@ -295,7 +310,7 @@
   // 權數 1,2,1,2,1,2,4,1；各乘積的十位與個位相加，總和可被 5 整除；第 7 碼為 7 時另可 (總和+1) 被 5 整除。
   // 通過只代表算式正確，不代表公司真實存在。
   var TAX_ID_WEIGHTS = [1, 2, 1, 2, 1, 2, 4, 1];
-  var TAX_ID_CHECKSUM_NOTE = '檢查碼不符，請確認（檢查碼通過不代表公司真實存在）';
+  var TAX_ID_CHECKSUM_NOTE = '（檢查碼通過不代表公司真實存在）';
 
   /**
    * 統一編號檢查碼；只接受 8 碼半形數字（0-9），不整理輸入、不去空白。

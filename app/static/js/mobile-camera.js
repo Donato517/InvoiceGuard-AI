@@ -1132,7 +1132,7 @@
     return make('span', { class: 'field-required' }, '*必填');
   }
 
-  const HINT_ICONS = { ok: '✓', compatible: 'ℹ', error: '✕' };
+  const HINT_ICONS = { ok: '✓', compatible: 'ℹ', warning: '⚠', error: '✕' };
 
   // 欄位格式提示：只在離開欄位時判斷（不逐字顯示、不呼叫 API）；沒有明確規則或尚未填寫時保持中性
   function showHint(hint, field, value) {
@@ -1146,7 +1146,7 @@
     hint.classList.add('field-hint--' + result.state);
     hint.append(make('span', { class: 'field-hint__icon', 'aria-hidden': 'true' }, HINT_ICONS[result.state]));
     hint.append(document.createTextNode(result.message));
-    // 統編檢查碼不符：只加一段提示文字，不改變格式狀態與送出限制
+    // 統編檢查碼不符（warning）：補充說明檢查碼通過不代表公司存在；只提醒，不阻擋送出
     if (result.note) hint.append(make('span', { class: 'field-hint__note' }, '　' + result.note));
     hint.hidden = false;
   }

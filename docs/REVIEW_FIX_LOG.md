@@ -454,3 +454,11 @@
 - 問題：列表頁是舊骨架（舊 5 種狀態、`invoice.id`、`risk_score`），與真實 API 與九種簽核狀態不符。
 - 處理檔案：`app/clients/invoices.py`（`fetch_invoices` 契約檢查）、`app/utils/invoice_list_view.py`（新）、`app/routers/invoices.py`（`invoice_list`）、`app/templates/pages/invoices/list.html`、`tests/unit/test_invoice_list.py`（新，45 個）、`tests/unit/test_pages.py`（兩個既有列表測試改為新契約）。
 - 驗證：pytest 1023 passed、54 skipped；node 127 passed；ruff、djlint、check_project 通過。另以隔離 PostgreSQL（TLS）＋本機 API／前台程序經真實 HTTP 驗證：真實登入、25 筆分兩頁（20＋5）、approved 篩選 5 筆、非法狀態視為全部、超出最後一頁訊息、他人只見自己的 3 筆且開不了別人的詳情（404）、無效 Cookie 導向登入、API 直連非法 status 與 page_size=101 回 422、無 idle in transaction。未驗：正式環境、部署、手機瀏覽器。
+
+
+## 2026-11-05 人工驗收修正：國字寫法不標準、統編檢查碼不符不顯示綠勾
+
+- 國字：`zhSuggestionFor` 新增 nonstandard（API 容錯解析一致但寫法與標準國字不同，例如 `億仟佰拾壹萬肆仟捌佰伍拾捌元`）也帶入標準國字，提醒保留原字串；mismatch 絕不覆寫；只差結尾「整」或空白不處理；kind 為 unreadable／blank／nonstandard。
+- 統編：檢查碼不符時 `evaluateField` 回 `warning`（⚠「檢查碼不符，請確認」＋不代表公司真實存在），不再是 `ok`／綠勾；仍不阻擋送出。
+- 處理檔案：app/static/js/invoice-field-rules.js、app/static/js/mobile-camera.js、app/static/css/pages/mobile-camera.css、tests/js 三個測試檔（舊測試鎖定舊行為或使用檢查碼不合法的假統編，已更新）。
+- 驗證：node --test 159 項、pytest 1037 passed／54 skipped、ruff 通過。未驗：真實瀏覽器與真實 API。

@@ -102,8 +102,9 @@ test('統編：既有整理只去空白與逗號，連字號不可接受；買�
   assert.equal(check('buyer_tax_id', '0459525').state, 'error')
 })
 
-test('統編的格式正確不代表檢查碼通過（檢查碼不屬於格式提示）', () => {
-  assert.equal(check('seller_tax_id', '12345678').state, 'ok')
+test('統編的格式正確不代表檢查碼通過：檢查碼不符是 warning，不是 ok', () => {
+  assert.equal(check('seller_tax_id', '12345678').state, 'warning')
+  assert.equal(check('seller_tax_id', '04595257').state, 'ok')
 })
 
 test('金額：半形數字最多 2 位小數；逗號與空白可整理；全形、負數、過多小數為錯誤', () => {
@@ -426,7 +427,9 @@ test('字軌：掃描所有 BMP 字元，只有半形英文字母、空白與連
         if (cfg.upper) oracle = oracle.replace(/[a-z]/g, (ch) => ch.toUpperCase())
         const strictlyOk = cfg.re.test(raw)
         const expected = strictlyOk ? 'ok' : cfg.re.test(oracle) ? 'compatible' : 'error'
-        const actual = check(field, raw).state
+        let actual = check(field, raw).state
+        // 統編格式通過但檢查碼不符時是 warning（格式面向仍是 ok／compatible）；這個掃描只比較格式
+        if (field === 'seller_tax_id' && actual === 'warning') actual = expected === 'error' ? actual : expected
         // 輸入全是雜訊（整理後為空）時是中性，不屬於這個比較
         if (oracle === '') { assert.equal(actual, 'empty'); continue }
         assert.equal(actual, expected, `${field} ${JSON.stringify(raw)} U+${code.toString(16)}`)
@@ -628,10 +631,11 @@ test('統編檢查碼：非字串、全形與阿拉伯-印度數字一律不通�
   }
 })
 
-test('統編提示：檢查碼不符只附 note，state 與送出限制不變', () => {
+test('統編提示：檢查碼不符是 warning（不顯示綠勾、仍可送出）並附 note', () => {
   for (const field of ['seller_tax_id', 'buyer_tax_id']) {
     const bad = Rules.evaluateField(field, '12345678')
-    assert.equal(bad.state, 'ok') // 格式正確，仍可送出
+    assert.equal(bad.state, 'warning') // 不是 ok：畫面不得對檢查碼不符的統編顯示「格式正確」
+    assert.equal(bad.message, '檢查碼不符，請確認')
     assert.equal(bad.note, Rules.TAX_ID_CHECKSUM_NOTE)
     assert.match(bad.note, /不代表公司真實存在/)
     const good = Rules.evaluateField(field, '04595257')
@@ -639,7 +643,7 @@ test('統編提示：檢查碼不符只附 note，state 與送出限制不變', 
     assert.equal('note' in good, false)
   }
   const spaced = Rules.evaluateField('seller_tax_id', '1234 5678')
-  assert.equal(spaced.state, 'compatible')
+  assert.equal(spaced.state, 'warning')
   assert.equal(spaced.note, Rules.TAX_ID_CHECKSUM_NOTE) // 以整理後的值計算
   assert.equal(Rules.evaluateField('seller_tax_id', '27601907').note, undefined)
 })
@@ -677,15 +681,28 @@ test('國字轉換：與 ADMIN 共用向量逐項相同（兩站檔案須逐位�
   }
 })
 
-test('國字建議：只有 API 回報無法判讀，或 AI 國字空白，且總計為合法整數才建議', () => {
+test('國字建議：API 回報無法判讀、AI 國字空白，或可解析但寫法不標準，且總計為合法整數才建議；mismatch 絕不覆寫', () => {
   const unreadable = { field: 'total_amount_zh', code: 'total_amount_zh_unreadable', message: 'x' }
   const mismatch = { field: 'total_amount_zh', code: 'total_amount_zh_mismatch', message: 'x' }
   const rec = (zh, total, warnings = []) => ({ invoice: { total_amount: total, total_amount_zh: zh }, warnings })
-  assert.deepEqual(Rules.zhSuggestionFor(rec('約壹萬', '14858', [unreadable])), { value: '壹萬肆仟捌佰伍拾捌元整', original: '約壹萬' })
-  assert.deepEqual(Rules.zhSuggestionFor(rec('', '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '' })
-  assert.deepEqual(Rules.zhSuggestionFor(rec(null, '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '' })
+  assert.deepEqual(Rules.zhSuggestionFor(rec('約壹萬', '14858', [unreadable])), { value: '壹萬肆仟捌佰伍拾捌元整', original: '約壹萬', kind: 'unreadable' })
+  assert.deepEqual(Rules.zhSuggestionFor(rec('', '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '', kind: 'blank' })
+  assert.deepEqual(Rules.zhSuggestionFor(rec(null, '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '', kind: 'blank' })
   assert.equal(Rules.zhSuggestionFor(rec('壹萬肆仟捌佰伍拾玖元整', '14858', [mismatch])), null) // 不符：只提示
-  assert.equal(Rules.zhSuggestionFor(rec('億仟佰拾壹萬肆仟捌佰伍拾捌元', '14858')), null) // 容錯解析一致：API 無警示
+  // 人工驗收案例：容錯解析一致（API 無警示）但寫法不標準 → 帶入標準國字，原字串留在 original
+  assert.deepEqual(Rules.zhSuggestionFor(rec('億仟佰拾壹萬肆仟捌佰伍拾捌元', '14858')), {
+    value: '壹萬肆仟捌佰伍拾捌元整',
+    original: '億仟佰拾壹萬肆仟捌佰伍拾捌元',
+    kind: 'nonstandard',
+  })
+  // 標準寫法（只差結尾「整」或空白）不處理
+  for (const same of ['壹萬肆仟捌佰伍拾捌元整', '壹萬肆仟捌佰伍拾捌元', ' 壹萬肆仟 捌佰伍拾捌元整 ']) {
+    assert.equal(Rules.zhSuggestionFor(rec(same, '14858')), null, same)
+  }
+  assert.match(
+    Rules.zhSuggestionText(Rules.zhSuggestionFor(rec('億仟佰拾壹萬肆仟捌佰伍拾捌元', '14858'))),
+    /億仟佰拾壹萬肆仟捌佰伍拾捌元.*寫法不標準.*壹萬肆仟捌佰伍拾捌元整/,
+  )
   for (const total of ['', null, 'abc', '14858.5', '-1']) {
     assert.equal(Rules.zhSuggestionFor(rec('', total)), null, String(total))
     assert.equal(Rules.zhSuggestionFor(rec('約壹萬', total, [unreadable])), null, String(total))

@@ -493,13 +493,23 @@ const upload = async (page) => {
 }
 const zhChanges = (sent) => sent.changes.filter((c) => c.field_name === 'total_amount_zh')
 
-test('國字建議：預印單位殘留但容錯解析一致（API 無警示）→ 不改值、不提示、不記修改', async () => {
+test('國字建議：預印單位殘留但容錯解析一致（API 無警示）→ 改成標準國字、提醒保留原字串、記為修改', async () => {
   const page = await setup({}, recWith({ total_amount_zh: TOLERANT_ZH }))
-  assert.equal(zhInput(page).value, TOLERANT_ZH)
-  assert.equal(suggestionNotes(page).length, 0)
+  assert.equal(zhInput(page).value, STANDARD_ZH)
+  const notes = suggestionNotes(page)
+  assert.equal(notes.length, 1)
+  assert.match(notes[0].textContent, new RegExp(TOLERANT_ZH)) // 原始 OCR 字串保留在提醒
+  assert.match(notes[0].textContent, /寫法不標準/)
+  assert.match(zhInput(page).closest('.field-group').querySelector('.field-modified').textContent, /AI 辨識：億仟佰拾壹萬/)
   const sent = await upload(page)
-  assert.equal(sent.total_amount_zh, TOLERANT_ZH)
-  assert.deepEqual(zhChanges(sent), [])
+  assert.equal(sent.total_amount_zh, STANDARD_ZH)
+  assert.equal(zhChanges(sent).length, 1) // AI 原值由 changes 與 API 的辨識紀錄保存
+})
+
+test('國字建議：標準國字（只差結尾「整」）不改值、不提示', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '壹萬肆仟捌佰伍拾捌元' }))
+  assert.equal(zhInput(page).value, '壹萬肆仟捌佰伍拾捌元')
+  assert.equal(suggestionNotes(page).length, 0)
 })
 
 test('國字建議：API 回報無法判讀、總計 14858 → 自動填入標準國字並顯示含原值的核對提醒', async () => {
@@ -605,6 +615,6 @@ test('國字建議：總計改動使國字被自動重算後，舊的建議提�
 test('國字建議：重新辨識另一張時依新結果重新判斷，不沿用上一張的建議', async () => {
   const first = await setup({}, recWith({ total_amount_zh: '' }))
   assert.equal(suggestionNotes(first).length, 1)
-  const second = await setup({}, recWith({ total_amount_zh: TOLERANT_ZH }))
+  const second = await setup({}, recWith({ total_amount_zh: '壹萬肆仟捌佰伍拾捌元整' }))
   assert.equal(suggestionNotes(second).length, 0)
 })

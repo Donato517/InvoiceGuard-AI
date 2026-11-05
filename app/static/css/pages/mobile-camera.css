@@ -463,6 +463,14 @@
   color: var(--color-primary-hover, #1d4ed8);
 }
 
+.field-hint--warning {
+  color: var(--color-warning-soft-text, #92400e);
+}
+
+.field-hint--warning .field-hint__icon {
+  color: var(--color-warning, #d97706);
+}
+
 .field-hint--error {
   color: var(--color-danger-soft-text, #991b1b);
 }
