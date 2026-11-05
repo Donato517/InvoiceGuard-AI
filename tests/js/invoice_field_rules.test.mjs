@@ -599,3 +599,68 @@ test('流程：proceed 為非同步時，忙碌鎖要等它完成才解除（避
   assert.equal(ctx.state.busy, false)
   assert.deepEqual(ctx.log.slice(-3), ['proceed:start', 'proceed:end', 'busy:false'])
 })
+
+// ---- 統編檢查碼：與 API tests/unit/test_tax_id_checksum.py 讀同一份向量 ----
+import { readFileSync } from 'node:fs'
+
+const sharedVectors = JSON.parse(
+  readFileSync(new URL('../fixtures/tax_id_vectors.json', import.meta.url), 'utf8')
+).vectors
+
+test('統編檢查碼：共用向量全部與 API 結果一致', () => {
+  assert.ok(sharedVectors.length >= 20)
+  for (const entry of sharedVectors) {
+    assert.equal(Rules.validTaxId(entry.tax_id), entry.valid, `${JSON.stringify(entry.tax_id)} ${entry.reason}`)
+  }
+})
+
+test('統編檢查碼：前導零與第 7 碼為 7 的例外', () => {
+  assert.equal(Rules.validTaxId('04595257'), true)
+  assert.equal(Rules.validTaxId('10458574'), true) // (S+1)%5
+  assert.equal(Rules.validTaxId('10000073'), true)
+  assert.equal(Rules.validTaxId('10000070'), false)
+  assert.equal(Rules.validTaxId('10000003'), false) // 第 7 碼不是 7，例外不適用
+})
+
+test('統編檢查碼：非字串、全形與阿拉伯-印度數字一律不通過', () => {
+  for (const value of [null, undefined, 4595257, ['04595257'], '０４５９５２５７', '٠٤٥٩٥٢٥٧', '04595257\n']) {
+    assert.equal(Rules.validTaxId(value), false, String(value))
+  }
+})
+
+test('統編提示：檢查碼不符只附 note，state 與送出限制不變', () => {
+  for (const field of ['seller_tax_id', 'buyer_tax_id']) {
+    const bad = Rules.evaluateField(field, '12345678')
+    assert.equal(bad.state, 'ok') // 格式正確，仍可送出
+    assert.equal(bad.note, Rules.TAX_ID_CHECKSUM_NOTE)
+    assert.match(bad.note, /不代表公司真實存在/)
+    const good = Rules.evaluateField(field, '04595257')
+    assert.equal(good.state, 'ok')
+    assert.equal('note' in good, false)
+  }
+  const spaced = Rules.evaluateField('seller_tax_id', '1234 5678')
+  assert.equal(spaced.state, 'compatible')
+  assert.equal(spaced.note, Rules.TAX_ID_CHECKSUM_NOTE) // 以整理後的值計算
+  assert.equal(Rules.evaluateField('seller_tax_id', '27601907').note, undefined)
+})
+
+test('統編提示：格式錯誤與空白不顯示檢查碼提示', () => {
+  assert.equal(Rules.evaluateField('seller_tax_id', '1234567').note, undefined)
+  assert.equal(Rules.evaluateField('seller_tax_id', '1234567').state, 'error')
+  assert.deepEqual(Rules.evaluateField('buyer_tax_id', ''), { state: 'empty', message: '' })
+  assert.equal(Rules.evaluateField('invoice_number', '12345678').note, undefined)
+})
+
+test('統編提示：人工修改後每次重新運算（合法↔非法）', () => {
+  const sequence = [
+    ['27601907', false],
+    ['27601908', true],
+    ['27601907', false],
+    ['12345678', true],
+    ['', false],
+    ['04595252', false],
+  ]
+  for (const [value, hasNote] of sequence) {
+    assert.equal(Boolean(Rules.evaluateField('seller_tax_id', value).note), hasNote, value)
+  }
+})

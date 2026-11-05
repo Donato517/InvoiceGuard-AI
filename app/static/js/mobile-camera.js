@@ -1085,6 +1085,8 @@
     hint.classList.add('field-hint--' + result.state);
     hint.append(make('span', { class: 'field-hint__icon', 'aria-hidden': 'true' }, HINT_ICONS[result.state]));
     hint.append(document.createTextNode(result.message));
+    // 統編檢查碼不符：只加一段提示文字，不改變格式狀態與送出限制
+    if (result.note) hint.append(make('span', { class: 'field-hint__note' }, '　' + result.note));
     hint.hidden = false;
   }
 
@@ -1774,6 +1776,7 @@
     'sales_amount',
     'tax_amount',
     'total_amount',
+    'total_amount_zh', // 人工改國字大寫後，重新取得國字核對警示
   ];
   let liveWarningTimer = null;
 

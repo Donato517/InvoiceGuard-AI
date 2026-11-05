@@ -148,7 +148,7 @@ function aiInvoice() {
   }
 }
 
-async function setup() {
+async function setup(extraGlobals = {}) {
   const doc = new FakeEl('document')
   const root = new FakeEl('body')
   doc.append(root)
@@ -200,7 +200,8 @@ async function setup() {
     Date,
     JSON,
     localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v } },
-    console
+    console,
+    ...extraGlobals
   }
   sandbox.window = sandbox
   sandbox.window.scrollTo = () => {}
@@ -392,4 +393,80 @@ test('業務警示：切換到確認頁時瀏覽器補送的 change（值沒有�
   total.fire('change')
   assert.equal(businessNotes(page).length, 0)
   assert.equal(page.box.hidden, true)
+})
+
+// ======== 國字大寫警示（API 規則：total_amount_zh_unreadable／total_amount_zh_mismatch）========
+const zhUnreadable = { field: 'total_amount_zh', code: 'total_amount_zh_unreadable', message: '國字大寫金額格式無法辨識，請對照票面人工確認' }
+const zhMismatch = { field: 'total_amount_zh', code: 'total_amount_zh_mismatch', message: '國字大寫金額與總計不符，請確認' }
+const zhGroup = (page) => page.fields.querySelector('#f-total_amount_zh').closest('.field-group')
+
+test('國字大寫警示：金額與國字一致時 API 無警示，畫面不出現國字提醒', async () => {
+  const page = await setup()
+  setHeader(page, 'total_amount', '14858')
+  setHeader(page, 'total_amount_zh', '壹萬肆仟捌佰伍拾捌元整')
+  await page.submit()
+  const sent = JSON.parse(warnCalls(page)[0].opts.body)
+  assert.equal(sent.total_amount_zh, '壹萬肆仟捌佰伍拾捌元整')
+  assert.equal(businessNotes(page).length, 0)
+  assert.equal(zhGroup(page).querySelectorAll('.field-business-warning').length, 0)
+})
+
+test('國字大寫警示：格式無法辨識時顯示在國字欄位旁與確認頁，原值不被改寫，仍可繼續', async () => {
+  const page = await setup()
+  setHeader(page, 'total_amount', '14858')
+  setHeader(page, 'total_amount_zh', '億仟佰拾壹萬肆仟捌佰伍拾捌元')
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [zhUnreadable], checked_on: '2026-11-05' })
+  await page.submit()
+  const notes = zhGroup(page).querySelectorAll('.field-business-warning')
+  assert.equal(notes.length, 1)
+  assert.equal(notes[0].textContent, zhUnreadable.message)
+  assert.equal(page.fields.querySelector('#f-total_amount_zh').value, '億仟佰拾壹萬肆仟捌佰伍拾捌元')
+  assert.equal(page.box.hidden, false)
+  assert.equal(page.boxList.children.length, 1)
+  assert.deepEqual(page.alerts, [])
+})
+
+test('國字大寫警示：金額不符時顯示 API 訊息，且與總計警示互不覆蓋', async () => {
+  const page = await setup()
+  setHeader(page, 'total_amount_zh', '壹萬肆仟捌佰伍拾玖元整')
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [totalMismatch, zhMismatch], checked_on: '2026-11-05' })
+  await page.submit()
+  assert.equal(businessNotes(page).length, 2)
+  assert.equal(zhGroup(page).querySelector('.field-business-warning').textContent, zhMismatch.message)
+  assert.equal(page.fields.querySelector('#f-total_amount').closest('.field-group').querySelectorAll('.field-business-warning').length, 1)
+  assert.equal(page.boxList.children.length, 2)
+})
+
+test('國字大寫警示：人工修改國字後舊警示立即清除，再次確認重新取得', async () => {
+  const page = await setup()
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [zhUnreadable], checked_on: '2026-11-05' })
+  await page.submit()
+  assert.equal(businessNotes(page).length, 1)
+  setHeader(page, 'total_amount_zh', '壹萬肆仟捌佰伍拾捌元整')
+  assert.equal(businessNotes(page).length, 0)
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [], checked_on: '2026-11-05' })
+  await page.submit()
+  assert.equal(businessNotes(page).length, 0)
+  assert.equal(page.box.hidden, true)
+})
+
+test('國字大寫警示：修改國字欄位會排程即時預覽並顯示警示', async () => {
+  const page = await setup({ setTimeout, clearTimeout })
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [zhMismatch], checked_on: '2026-11-05' })
+  setHeader(page, 'total_amount_zh', '壹萬肆仟捌佰伍拾玖元整')
+  await new Promise((r) => setTimeout(r, 800)) // 即時預覽延遲 500ms
+  assert.equal(warnCalls(page).length, 1)
+  assert.equal(JSON.parse(warnCalls(page)[0].opts.body).total_amount_zh, '壹萬肆仟捌佰伍拾玖元整')
+  assert.equal(zhGroup(page).querySelectorAll('.field-business-warning').length, 1)
+})
+
+test('國字大寫警示：未知代碼仍被濾掉，新代碼在白名單內', async () => {
+  const Rules = (await import('node:module')).createRequire(import.meta.url)('../../app/static/js/invoice-field-rules.js')
+  const parsed = Rules.parseWarningResult({
+    ok: true,
+    data: { warnings: [zhUnreadable, zhMismatch, { field: 'total_amount_zh', code: 'something_else', message: 'x' }] }
+  })
+  assert.deepEqual(parsed.warnings.map((w) => w.code), ['total_amount_zh_unreadable', 'total_amount_zh_mismatch'])
+  assert.equal(Rules.warningKey(zhMismatch), 'h:total_amount_zh')
+  assert.equal(Rules.warningText(zhMismatch, {}), zhMismatch.message)
 })
