@@ -758,7 +758,9 @@ test('P2 殘留缺漏：清空 AI 明細整列仍不計入「空白新增明細�
 // 第一批 UX 合併後的 3 個 bug：國字大寫同步、核對頁即時金額警示、AI 缺漏提示在使用者補填後清除
 // =====================================================================
 const warningsOf = (page) => page.fields.querySelectorAll('.field-business-warning')
-const visibleAiWarnings = (page) => page.fields.querySelectorAll('.field-warning').filter((n) => !n.hidden)
+// 國字自動建議提醒（field-suggestion）不是 API 的 AI 警示，另有測試；這裡只算 API 警示
+const visibleAiWarnings = (page) =>
+  page.fields.querySelectorAll('.field-warning').filter((n) => !n.hidden && !n.classList.contains('field-suggestion'))
 
 test('Bug1：amountToChinese 轉換（含中間零、萬／億段、無法轉換回 null）', async () => {
   const R = await rulesOf()

@@ -131,6 +131,8 @@
   let currentDraft = null;
   // 使用者親自改過「國字大寫」後，不再隨總計自動更新（清空後恢復自動）
   let zhManual = false;
+  // 辨識當下依總計帶入的國字建議（{ value, original }）；null 表示沒有自動帶入
+  let zhSuggestion = null;
   let currentPayload = null; // 核對完成、準備查重與送出的內容
   let aiItems = {}; // AI 辨識明細：line_no → 明細
   let committed = new Map(); // 各欄位最後一次記入修改紀錄的值
@@ -951,6 +953,13 @@
       currentDraft[field] = invoice[field] || '';
     });
     if (!currentDraft.items.length) currentDraft.items.push(newRow(null));
+    // 國字無法判讀或 AI 沒辨識到，且總計有效：自動帶入標準國字。每張辨識結果只做這一次（startReview 只在辨識完成時呼叫）；
+    // AI 原值留在 currentRecognition，修改紀錄用既有的 recordEdit（AI 原值 → 建議值）。
+    zhSuggestion = Rules.zhSuggestionFor(result);
+    if (zhSuggestion) {
+      currentDraft.total_amount_zh = zhSuggestion.value;
+      recordEdit('header', null, 'total_amount_zh', zhSuggestion.value);
+    }
   }
 
   async function recognizeCurrentImage(button) {
@@ -1022,12 +1031,23 @@
     return canonicalValue(field, input.value) !== aiHeaderValue(field);
   }
 
+  // 自動帶入的國字提醒只在欄位仍是建議值時顯示；使用者改了國字或總計帶動重算後即失效
+  function zhSuggestionVisible() {
+    if (!zhSuggestion) return false;
+    const input = $('#f-total_amount_zh');
+    return Boolean(input) && canonicalValue('total_amount_zh', input.value) === canonicalValue('total_amount_zh', zhSuggestion.value);
+  }
+
   function syncRecognitionWarnings() {
     if (!currentRecognition) return;
     const warnings = currentRecognition.warnings || [];
     document.querySelectorAll('#fields-container .field-warning').forEach((node) => {
       const warning = warnings[Number(node.dataset.warningIndex)];
       node.hidden = Boolean(warning) && recognitionWarningDismissed(warning);
+    });
+    // 建議提醒同樣掛 field-warning 樣式但不屬於 API 警示（沒有 data-warning-index），要在上面的迴圈之後單獨處理
+    document.querySelectorAll('#fields-container .field-suggestion').forEach((node) => {
+      node.hidden = !zhSuggestionVisible();
     });
     renderRecognitionWarningList();
   }
@@ -1126,6 +1146,8 @@
     hint.classList.add('field-hint--' + result.state);
     hint.append(make('span', { class: 'field-hint__icon', 'aria-hidden': 'true' }, HINT_ICONS[result.state]));
     hint.append(document.createTextNode(result.message));
+    // 統編檢查碼不符：只加一段提示文字，不改變格式狀態與送出限制
+    if (result.note) hint.append(make('span', { class: 'field-hint__note' }, '　' + result.note));
     hint.hidden = false;
   }
 
@@ -1233,6 +1255,9 @@
         )
       )
     );
+    if (field === 'total_amount_zh' && zhSuggestion) {
+      group.append(make('small', { class: 'field-warning field-suggestion', role: 'note' }, Rules.zhSuggestionText(zhSuggestion)));
+    }
     return group;
   }
 
@@ -1539,16 +1564,18 @@
 
   function renderRecognitionWarningList() {
     const warnings = (currentRecognition.warnings || []).filter((w) => !recognitionWarningDismissed(w));
+    const messages = warnings.map((w) => w.message);
+    if (zhSuggestionVisible()) messages.push(Rules.zhSuggestionText(zhSuggestion));
     setText(
       '#recognition-summary',
-      (warnings.length ? 'AI 辨識完成，有 ' + warnings.length + ' 項需要核對：' : 'AI 辨識完成，請對照影像逐欄核對。') +
+      (messages.length ? 'AI 辨識完成，有 ' + messages.length + ' 項需要核對：' : 'AI 辨識完成，請對照影像逐欄核對。') +
         '修改過的欄位會標示「已修改」，送出後一併標記給審核人員。'
     );
     const list = $('#recognition-warnings');
     if (list) {
       list.textContent = '';
-      warnings.forEach((w) => list.append(make('li', {}, w.message)));
-      list.hidden = !warnings.length;
+      messages.forEach((message) => list.append(make('li', {}, message)));
+      list.hidden = !messages.length;
     }
   }
 
@@ -1815,6 +1842,7 @@
     'sales_amount',
     'tax_amount',
     'total_amount',
+    'total_amount_zh', // 人工改國字大寫後，重新取得國字核對警示
   ];
   let liveWarningTimer = null;
 
@@ -2312,6 +2340,7 @@
       btnNext.onclick = function () {
         releaseImage();
         currentRecognition = null;
+        zhSuggestion = null;
         currentDraft = null;
         currentPayload = null;
         editLog = [];
