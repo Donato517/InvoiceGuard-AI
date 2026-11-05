@@ -10,11 +10,12 @@
     - 發票流程 1～3 步驟由前台採購端執行，後續步驟 4～9 轉由後台審核。
 """
 
+import re
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.clients import invoices as invoices_client
@@ -93,6 +94,33 @@ def _build_user_flow_steps(current_step: int, invoice_id: int) -> list[dict[str,
             }
         )
     return steps
+
+
+@router.get("/showcase-reference", response_class=HTMLResponse)
+async def showcase_reference_page(
+    request: Request, token: AccessToken, tax_id: str = "", layout: str = ""
+) -> HTMLResponse:
+    """供上傳核對時另開的唯讀參考，不改寫本次發票欄位。"""
+    if tax_id and not re.fullmatch(r"[0-9]{8}", tax_id):
+        raise HTTPException(400, "請輸入八碼供應商統編")
+    items = await invoices_client.showcase_references(token, tax_id, layout[:120]) if tax_id else []
+    return templates.TemplateResponse(
+        request,
+        "pages/invoices/showcase_reference.html",
+        {"items": items, "tax_id": tax_id, "layout": layout},
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/showcase-reference/{sample}/{revision}/file")
+async def showcase_reference_image(token: AccessToken, sample: UUID, revision: UUID) -> Response:
+    """每次讀圖經 API 再驗 Session 與啟用狀態。"""
+    content, mime = await invoices_client.showcase_image(token, str(sample), str(revision))
+    return Response(
+        content,
+        media_type=mime,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("", response_class=HTMLResponse)

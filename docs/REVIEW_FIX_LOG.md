@@ -462,3 +462,12 @@
 - 統編：檢查碼不符時 `evaluateField` 回 `warning`（⚠「檢查碼不符，請確認」＋不代表公司真實存在），不再是 `ok`／綠勾；仍不阻擋送出。
 - 處理檔案：app/static/js/invoice-field-rules.js、app/static/js/mobile-camera.js、app/static/css/pages/mobile-camera.css、tests/js 三個測試檔（舊測試鎖定舊行為或使用檢查碼不合法的假統編，已更新）。
 - 驗證：node --test 159 項、pytest 1037 passed／54 skipped、ruff 通過。未驗：真實瀏覽器與真實 API。
+
+## 2026-11-06 Show Case 交付
+
+原因：上傳核對需要可追溯的供應商範例，但範例不應直接改寫本次發票，也不應另建第二份供應商主檔。
+結論：ADMIN 維護與人工確認、API 提供有效範例、前台另開唯讀參考。新範例綁定正式供應商，原圖與歷程保留；逐次驗權、版本衝突、來源 SHA-256 與失敗回滾由既有分層處理。正式發票換算／檢核流程保留。
+界線：結構版本檔是待 DB 負責人審查的定義，沒有套用正式 migration。正式範例表與私有歷程擴充須依團隊手動 SQL 流程核對；無權限或缺表時拒絕，不以假成功取代。模型比較、真實角色與 Storage、獨立 PostgreSQL 多連線及 Preview 仍待驗收。
+說明見 FEATURE-DELIVERY-20261106.md；提交前的實際驗證結果另補 TEST_REPORT。
+
+交付驗證（2026-11-06）：完整 pytest 1040 passed、54 skipped（180.94 秒），1 個既有 Starlette 警告；check_project --project-root ..、Ruff lint／69 檔格式、28 份樣板 djLint 通過。跳過案例仍未驗收。

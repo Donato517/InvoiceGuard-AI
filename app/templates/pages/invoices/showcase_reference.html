@@ -1,0 +1,32 @@
+{# @template pages/invoices/showcase_reference.html @description 登入者供應商參考範例，不提供維護操作。 #}
+{% extends "layouts/default.html" %}
+{% block title %}供應商範例參考{% endblock %}
+{% block content %}
+  <main class="container">
+    <h1>供應商範例參考</h1>
+    <p>這些是已確認、啟用的歷史範例。日期、品名及金額不同不代表本次發票有錯；不會自動套用範例答案。</p>
+    <form action="/invoices/showcase-reference" method="get">
+      <label>
+        供應商統編<input name="tax_id"
+       value="{{ tax_id }}"
+       required
+       pattern="[0-9]{8}"
+       maxlength="8">
+      </label>
+      <label>
+        版型<input name="layout" value="{{ layout }}" maxlength="120">
+      </label>
+      <button type="submit">查詢參考範例</button>
+    </form>
+    {% for item in items %}
+      <section class="card">
+        <h2>{{ item.title }} · {{ item.supplier_name }}</h2>
+        <p>{{ item.layout }} · {{ item.writing }}</p>
+        <a href="/invoices/showcase-reference/{{ item.sample_id }}/{{ item.revision_id }}/file"
+           target="_blank"
+           rel="noopener">開啟原圖放大核對</a>
+        {% for truth in item.truths %}<p>{{ truth.path }}：{{ truth.text if truth.state == 'readable' else '空白、不可讀或不適用' }}</p>{% endfor %}
+      </section>
+{% else %}<p>尚未查詢或無適用範例，請繼續人工核對。</p>{% endfor %}
+  </main>
+{% endblock %}

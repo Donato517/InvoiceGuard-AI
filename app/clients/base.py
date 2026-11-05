@@ -67,6 +67,32 @@ async def request_json(method: str, path: str, *, token: str | None = None, **kw
     return response.json()
 
 
+async def request_image(path: str, *, token: str) -> tuple[bytes, str]:
+    """透過既有 API 設定讀取受保護的範例圖片，不將 Token 放入圖片 URL。"""
+    settings.require_environment()
+    try:
+        async with (
+            httpx.AsyncClient(
+                base_url=settings.API_BASE_URL, timeout=settings.API_TIMEOUT_SECONDS
+            ) as client,
+            client.stream("GET", path, headers={"Authorization": f"Bearer {token}"}) as response,
+        ):
+            if response.is_error or response.is_redirect:
+                await response.aread()
+                raise _to_api_error(response)
+            mime = response.headers.get("content-type", "").split(";")[0]
+            if mime not in {"image/jpeg", "image/png"}:
+                raise ApiError(502, "SHOWCASE_IMAGE_INVALID", "範例圖片格式不符")
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > 4 * 1024 * 1024:
+                    raise ApiError(502, "SHOWCASE_IMAGE_INVALID", "範例圖片超過大小限制")
+            return bytes(content), mime
+    except httpx.HTTPError:
+        raise ApiError(503, "NETWORK_ERROR", "範例來源暫時無法連線") from None
+
+
 def _to_api_error(response: httpx.Response) -> ApiError:
     """將 API 的錯誤回應轉為 ApiError；回應格式不符時使用預設訊息。"""
     try:
