@@ -77,6 +77,38 @@
     return out + '元整';
   }
 
+  // ---- 國字大寫建議值（辨識完成當下）----
+  // 判斷只依 API 的警示：國字無法判讀（total_amount_zh_unreadable）或 AI 沒有辨識到國字（空白），且數字總計是合法整數，
+  // 才依總計帶入標準國字；可解析但與總計不符（mismatch）只提示、不自動覆寫。容錯解析一致的國字（API 無警示）不處理。
+  var ZH_ORIGINAL_MAX = 60;
+
+  /**
+   * 辨識結果是否需要自動帶入國字建議值。
+   * @param {{invoice: Object, warnings: Array}} recognition API 辨識回應。
+   * @returns {{value: string, original: string}|null} value 為標準國字；original 為 AI 原始國字（空白為 ''）；不需要時 null。
+   */
+  function zhSuggestionFor(recognition) {
+    var invoice = (recognition && recognition.invoice) || {};
+    var warnings = (recognition && recognition.warnings) || [];
+    var original = String(invoice.total_amount_zh === null || invoice.total_amount_zh === undefined ? '' : invoice.total_amount_zh).trim();
+    var unreadable = warnings.some(function (w) {
+      return w && w.field === 'total_amount_zh' && w.code === 'total_amount_zh_unreadable';
+    });
+    if (!unreadable && original !== '') return null;
+    var value = amountToChinese(invoice.total_amount);
+    return value ? { value: value, original: original } : null;
+  }
+
+  /** 自動帶入後給上傳者的核對提醒（純文字；原值過長只顯示前段）。 */
+  function zhSuggestionText(suggestion) {
+    var original = suggestion.original;
+    var shown = original.length > ZH_ORIGINAL_MAX ? original.slice(0, ZH_ORIGINAL_MAX) + '…' : original;
+    var head = original
+      ? 'AI 辨識的國字大寫「' + shown + '」無法判讀，'
+      : 'AI 沒有辨識到國字大寫金額，';
+    return head + '已依總計自動帶入「' + suggestion.value + '」，請對照原始發票核對。';
+  }
+
   // ---- 必填欄位（與 API InvoiceSubmitRequest 沒有預設值的欄位相同；recognition_id 為內部欄位不列入）----
   var REQUIRED_HEADER_FIELDS = [
     'invoice_track',
@@ -588,6 +620,8 @@
     warningKey: warningKey,
     differenceText: differenceText,
     amountToChinese: amountToChinese,
+    zhSuggestionFor: zhSuggestionFor,
+    zhSuggestionText: zhSuggestionText,
     warningText: warningText,
     planMissing: planMissing,
     placeMissing: placeMissing,

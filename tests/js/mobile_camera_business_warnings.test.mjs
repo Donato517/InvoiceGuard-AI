@@ -148,7 +148,7 @@ function aiInvoice() {
   }
 }
 
-async function setup(extraGlobals = {}) {
+async function setup(extraGlobals = {}, recognition = null) {
   const doc = new FakeEl('document')
   const root = new FakeEl('body')
   doc.append(root)
@@ -179,7 +179,7 @@ async function setup(extraGlobals = {}) {
   const alerts = []
   const json = (data, ok = true) => ({ ok, redirected: false, url: '', json: async () => data })
   const routes = {
-    '/invoices/mobile-recognize': () => json(aiInvoice()),
+    '/invoices/mobile-recognize': () => json(recognition ? recognition() : aiInvoice()),
     '/invoices/check-required': () => json({ required_complete: true, missing: [] }),
     '/invoices/check-warnings': () => json({ warnings: [], checked_on: '2026-10-30' }),
     '/invoices/check-duplicate': () => json({ is_duplicate: false }),
@@ -469,4 +469,142 @@ test('國字大寫警示：未知代碼仍被濾掉，新代碼在白名單內',
   assert.deepEqual(parsed.warnings.map((w) => w.code), ['total_amount_zh_unreadable', 'total_amount_zh_mismatch'])
   assert.equal(Rules.warningKey(zhMismatch), 'h:total_amount_zh')
   assert.equal(Rules.warningText(zhMismatch, {}), zhMismatch.message)
+})
+
+// ======== 國字大寫自動建議值（無法判讀或空白時，依數字總計帶入標準國字）========
+const TOLERANT_ZH = '億仟佰拾壹萬肆仟捌佰伍拾捌元' // 預印單位殘留，但 API 容錯解析為 14858
+const STANDARD_ZH = '壹萬肆仟捌佰伍拾捌元整'
+const recWith = (invoice, warnings = []) => () => {
+  const base = aiInvoice()
+  return { ...base, warnings, invoice: { ...base.invoice, sales_amount: '14150', tax_amount: '708', total_amount: '14858', ...invoice } }
+}
+const zhInput = (page) => page.fields.querySelector('#f-total_amount_zh')
+const suggestionNotes = (page) => page.fields.querySelectorAll('.field-suggestion')
+const zhUnreadableWarning = { field: 'total_amount_zh', code: 'total_amount_zh_unreadable', message: '無法判讀國字大寫金額，請對照票面確認' }
+const zhMismatchWarning = { field: 'total_amount_zh', code: 'total_amount_zh_mismatch', message: '國字大寫金額（14,859）與總計不符，請確認' }
+const upload = async (page) => {
+  await page.submit()
+  page.ids['btn-check-duplicate'].click()
+  await new Promise((r) => setTimeout(r, 0))
+  page.ids['finalAck'].checked = true
+  page.ids['btn-final-upload'].click()
+  await new Promise((r) => setTimeout(r, 0))
+  return JSON.parse([...page.calls].reverse().find((c) => c.url === '/invoices/mobile-upload').opts.body)
+}
+const zhChanges = (sent) => sent.changes.filter((c) => c.field_name === 'total_amount_zh')
+
+test('國字建議：預印單位殘留但容錯解析一致（API 無警示）→ 不改值、不提示、不記修改', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: TOLERANT_ZH }))
+  assert.equal(zhInput(page).value, TOLERANT_ZH)
+  assert.equal(suggestionNotes(page).length, 0)
+  const sent = await upload(page)
+  assert.equal(sent.total_amount_zh, TOLERANT_ZH)
+  assert.deepEqual(zhChanges(sent), [])
+})
+
+test('國字建議：API 回報無法判讀、總計 14858 → 自動填入標準國字並顯示含原值的核對提醒', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '約壹萬四' }, [zhUnreadableWarning]))
+  assert.equal(zhInput(page).value, STANDARD_ZH)
+  const notes = suggestionNotes(page)
+  assert.equal(notes.length, 1)
+  assert.match(notes[0].textContent, /約壹萬四/) // 原始 OCR 國字
+  assert.match(notes[0].textContent, new RegExp(STANDARD_ZH)) // 建議值
+  assert.match(notes[0].textContent, /核對/)
+  assert.equal(notes[0].hidden, false)
+  // 欄位旁仍顯示「已修改｜AI 辨識：原值」
+  assert.match(zhInput(page).closest('.field-group').querySelector('.field-modified').textContent, /AI 辨識：約壹萬四/)
+})
+
+test('國字建議：AI 國字空白、總計 14858 → 自動填入並提醒（沒有 AI 原值可顯示）', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '' }))
+  assert.equal(zhInput(page).value, STANDARD_ZH)
+  const notes = suggestionNotes(page)
+  assert.equal(notes.length, 1)
+  assert.match(notes[0].textContent, /沒有辨識到/)
+  assert.match(notes[0].textContent, new RegExp(STANDARD_ZH))
+})
+
+test('國字建議：自動填入使用既有修改紀錄（AI 原值→建議值），送出時保留 AI 原值作為 old_value', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '約壹萬四' }, [zhUnreadableWarning]))
+  const sent = await upload(page)
+  assert.equal(sent.total_amount_zh, STANDARD_ZH)
+  const changes = zhChanges(sent)
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].old_value, '約壹萬四')
+  assert.equal(changes[0].new_value, STANDARD_ZH)
+})
+
+test('國字建議：空白時的修改紀錄 old_value 為空', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '' }))
+  const changes = zhChanges(await upload(page))
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].old_value, null)
+})
+
+test('國字建議：國字可解析但與總計不符 → 只提示，不自動覆寫', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '壹萬肆仟捌佰伍拾玖元整' }, [zhMismatchWarning]))
+  assert.equal(zhInput(page).value, '壹萬肆仟捌佰伍拾玖元整')
+  assert.equal(suggestionNotes(page).length, 0)
+  const warn = zhInput(page).closest('.field-group').querySelectorAll('.field-warning')
+  assert.equal(warn.length, 1)
+  assert.equal(warn[0].textContent, zhMismatchWarning.message)
+  assert.deepEqual(zhChanges(await upload(page)), [])
+})
+
+test('國字建議：總計空白、非法或非整數 → 不產生建議國字', async () => {
+  for (const total of ['', 'abc', '14858.5', '-5']) {
+    const page = await setup({}, recWith({ total_amount: total, total_amount_zh: '' }))
+    assert.equal(zhInput(page).value, '', JSON.stringify(total))
+    assert.equal(suggestionNotes(page).length, 0, JSON.stringify(total))
+    const unreadable = await setup({}, recWith({ total_amount: total, total_amount_zh: '約壹萬' }, [zhUnreadableWarning]))
+    assert.equal(zhInput(unreadable).value, '約壹萬', JSON.stringify(total))
+    assert.equal(suggestionNotes(unreadable).length, 0, JSON.stringify(total))
+  }
+})
+
+test('國字建議：原值含 HTML 字元只當純文字顯示，不被當成標籤', async () => {
+  const evil = '<img src=x onerror=alert(1)>'
+  const page = await setup({}, recWith({ total_amount_zh: evil }, [zhUnreadableWarning]))
+  const note = suggestionNotes(page)[0]
+  assert.ok(note.textContent.includes(evil))
+  assert.ok(note.children.every((child) => child.nodeType === 3)) // 只有文字節點：沒有被解析成 HTML 元素
+})
+
+test('國字建議：使用者手動改國字後提醒消失、不再被自動覆寫；清空後恢復自動', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '約壹萬四' }, [zhUnreadableWarning]))
+  setHeader(page, 'total_amount_zh', '壹萬肆仟捌佰伍拾捌圓整') // 人工
+  assert.equal(suggestionNotes(page)[0].hidden, true)
+  setHeader(page, 'total_amount', '20000')
+  assert.equal(zhInput(page).value, '壹萬肆仟捌佰伍拾捌圓整')
+  setHeader(page, 'total_amount_zh', '')
+  setHeader(page, 'total_amount', '30000')
+  assert.equal(zhInput(page).value, '參萬元整')
+})
+
+test('國字建議：按確認（取得業務警示）與重新預覽後，核對提醒不消失也不重複填值', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '約壹萬四' }, [zhUnreadableWarning]))
+  page.routes['/invoices/check-warnings'] = () => page.json({ warnings: [totalMismatch], checked_on: '2026-11-05' })
+  await page.submit()
+  assert.equal(suggestionNotes(page).length, 1)
+  assert.equal(suggestionNotes(page)[0].hidden, false)
+  assert.equal(zhInput(page).value, STANDARD_ZH)
+  setHeader(page, 'sales_amount', '14150') // 觸發舊警示清除
+  assert.equal(suggestionNotes(page)[0].hidden, false)
+  const sent = await upload(page)
+  assert.equal(zhChanges(sent).length, 1) // 修改紀錄沒有因重複流程而重複
+})
+
+test('國字建議：總計改動使國字被自動重算後，舊的建議提醒隱藏', async () => {
+  const page = await setup({}, recWith({ total_amount_zh: '' }))
+  assert.equal(suggestionNotes(page)[0].hidden, false)
+  setHeader(page, 'total_amount', '20000') // 國字自動改成 貳萬元整，已不是當初的建議值
+  assert.equal(zhInput(page).value, '貳萬元整')
+  assert.equal(suggestionNotes(page)[0].hidden, true)
+})
+
+test('國字建議：重新辨識另一張時依新結果重新判斷，不沿用上一張的建議', async () => {
+  const first = await setup({}, recWith({ total_amount_zh: '' }))
+  assert.equal(suggestionNotes(first).length, 1)
+  const second = await setup({}, recWith({ total_amount_zh: TOLERANT_ZH }))
+  assert.equal(suggestionNotes(second).length, 0)
 })

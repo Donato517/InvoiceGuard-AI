@@ -664,3 +664,41 @@ test('統編提示：人工修改後每次重新運算（合法↔非法）', ()
     assert.equal(Boolean(Rules.evaluateField('seller_tax_id', value).note), hasNote, value)
   }
 })
+
+// ---- 國字大寫建議值：共用向量與觸發條件 ----
+const zhVectors = JSON.parse(
+  readFileSync(new URL('../fixtures/amount_to_chinese_vectors.json', import.meta.url), 'utf8')
+).vectors
+
+test('國字轉換：與 ADMIN 共用向量逐項相同（兩站檔案須逐位元組相同）', () => {
+  assert.ok(zhVectors.length >= 40)
+  for (const { input, output } of zhVectors) {
+    assert.equal(Rules.amountToChinese(input), output, JSON.stringify(input))
+  }
+})
+
+test('國字建議：只有 API 回報無法判讀，或 AI 國字空白，且總計為合法整數才建議', () => {
+  const unreadable = { field: 'total_amount_zh', code: 'total_amount_zh_unreadable', message: 'x' }
+  const mismatch = { field: 'total_amount_zh', code: 'total_amount_zh_mismatch', message: 'x' }
+  const rec = (zh, total, warnings = []) => ({ invoice: { total_amount: total, total_amount_zh: zh }, warnings })
+  assert.deepEqual(Rules.zhSuggestionFor(rec('約壹萬', '14858', [unreadable])), { value: '壹萬肆仟捌佰伍拾捌元整', original: '約壹萬' })
+  assert.deepEqual(Rules.zhSuggestionFor(rec('', '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '' })
+  assert.deepEqual(Rules.zhSuggestionFor(rec(null, '14858')), { value: '壹萬肆仟捌佰伍拾捌元整', original: '' })
+  assert.equal(Rules.zhSuggestionFor(rec('壹萬肆仟捌佰伍拾玖元整', '14858', [mismatch])), null) // 不符：只提示
+  assert.equal(Rules.zhSuggestionFor(rec('億仟佰拾壹萬肆仟捌佰伍拾捌元', '14858')), null) // 容錯解析一致：API 無警示
+  for (const total of ['', null, 'abc', '14858.5', '-1']) {
+    assert.equal(Rules.zhSuggestionFor(rec('', total)), null, String(total))
+    assert.equal(Rules.zhSuggestionFor(rec('約壹萬', total, [unreadable])), null, String(total))
+  }
+  assert.equal(Rules.zhSuggestionFor(null), null)
+})
+
+test('國字建議提醒文字：含原值與建議值；原值過長截斷；空白原值改用另一句', () => {
+  const withOriginal = Rules.zhSuggestionText({ value: '壹元整', original: '約壹' })
+  assert.match(withOriginal, /「約壹」無法判讀/)
+  assert.match(withOriginal, /自動帶入「壹元整」/)
+  assert.match(withOriginal, /核對/)
+  assert.match(Rules.zhSuggestionText({ value: '壹元整', original: '' }), /沒有辨識到國字大寫/)
+  const long = Rules.zhSuggestionText({ value: '壹元整', original: '壹'.repeat(200) })
+  assert.ok(long.includes('壹'.repeat(60) + '…') && !long.includes('壹'.repeat(61)))
+})
