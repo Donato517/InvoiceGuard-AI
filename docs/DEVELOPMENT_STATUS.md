@@ -49,3 +49,8 @@ C 組第一批 UX 合併後修正（2026-11-01，分支 feature/c-ux-field-check
 圖片退件作廢（2026-11-03，分支 feature/resubmit-frontend，**尚未 Commit**）：補正頁在圖片問題時提供「作廢此案件並重新上傳」，經前台 `POST /invoices/{uuid}/void` 呼叫 API 作廢（僅原提交者），成功後連到既有的手機／電腦上傳頁重新辨識與首次提交（新案件、新 invoice_id）。已以瀏覽器在本機隔離環境操作；OCR 以辨識紀錄替身取代。
 
 `other` 類退回（2026-11-04，分支 feature/e2e-integration-verify，未 Commit）：補正頁在 `can_resubmit=false` 時顯示財務退回原因與處理限制（非欄位、非圖片問題不能補正／申覆，也不當成圖片問題；沒有作廢入口），並新增單元測試。`other` 是否允許申請人作廢仍待團隊決議（API 目前允許任何 `returned_to_applicant` 案件由原提交者作廢）。
+
+前台人工驗收修正（2026-11-05，分支 `fix/frontend-bdc-acceptance`；細節見 `docs/REVIEW_FIX_LOG.md`）：
+- **國字大寫**：`zhSuggestionFor` 新增 nonstandard：API 容錯解析一致但寫法與標準國字不同（例如 `億仟佰拾壹萬肆仟捌佰伍拾捌元`，總計 14858）時，辨識當下自動帶入標準國字，提醒顯示 AI 原字串並照既有機制記為修改；mismatch 只警示不覆寫；只差結尾「整」或空白不處理；人工修改不被覆寫。
+- **統編檢查碼**：檢查碼不符時 `evaluateField` 回 `warning`（⚠「檢查碼不符，請確認」），不再顯示綠勾或綠框；仍不阻擋送出；買受人與銷貨人都檢查。
+- **未驗證**：真實瀏覽器與真實 API；`mobile-camera.js` 其他行為未變。

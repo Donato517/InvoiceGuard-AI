@@ -284,7 +284,7 @@ test('UX-01：統編輸入中立即紅色，完成 8 碼半形數字立即綠色
   assert.ok(el.classList.contains('is-invalid'))
   assert.ok(!el.classList.contains('is-valid'))
   assert.ok(hintOf(page, 'seller_tax_id').classList.contains('field-hint--error'))
-  typeLive(el, '12345678')
+  typeLive(el, '04595257')
   assert.ok(el.classList.contains('is-valid'))
   assert.ok(!el.classList.contains('is-invalid'))
   assert.ok(hintOf(page, 'seller_tax_id').classList.contains('field-hint--ok'))
@@ -301,7 +301,7 @@ test('UX-01：初次載入 AI 辨識值違反格式就顯示錯誤；格式正�
 test('UX-01：「已修改」與「格式正確」分開——修改後同時有 is-modified 與 is-valid', async () => {
   const page = await load()
   const el = ctl(page, 'seller_tax_id')
-  typeLive(el, '12345678') // AI 值是 27601907，改過
+  typeLive(el, '04595257') // AI 值是 27601907，改過
   assert.ok(el.closest('.field-group').classList.contains('is-modified'))
   assert.ok(el.classList.contains('is-valid'))
   typeLive(el, '27601907') // 改回 AI 值：不再是已修改，仍是格式正確
@@ -383,8 +383,8 @@ test('UX-03：台灣日期判斷不受 UTC 日期影響', async () => {
 test('UX-04：全形數字自動轉半形並保留前導零，立即重新檢核', async () => {
   const page = await load()
   const el = ctl(page, 'seller_tax_id')
-  typeLive(el, '００１２３４５６')
-  assert.equal(el.value, '00123456')
+  typeLive(el, '０４５９５２５７')
+  assert.equal(el.value, '04595257')
   assert.ok(el.classList.contains('is-valid'))
   const total = ctl(page, 'total_amount')
   typeLive(total, '１２３')
@@ -474,11 +474,11 @@ test('P1-1：compositionend 後轉半形、保留前導零、立即重新檢核�
   const el = ctl(page, 'seller_tax_id')
   const before = page.calls.length
   el.fire('compositionstart')
-  el.value = '００１２３４５６'
+  el.value = '０４５９５２５７'
   el.fire('input', { isComposing: true })
-  assert.equal(el.value, '００１２３４５６')
+  assert.equal(el.value, '０４５９５２５７')
   el.fire('compositionend')
-  assert.equal(el.value, '00123456')
+  assert.equal(el.value, '04595257')
   assert.ok(el.classList.contains('is-valid'))
   assert.ok(el.closest('.field-group').classList.contains('is-modified')) // AI 值是 27601907
   assert.match(el.closest('.field-group').querySelector('.field-modified').textContent, /27601907/) // AI 原值仍顯示
@@ -609,7 +609,7 @@ test('P2-1：aria-invalid 與紅色錯誤一致（錯誤時有、修正後沒有
   const el = ctl(page, 'seller_tax_id')
   typeLive(el, '1')
   assert.ok(el.classList.contains('is-invalid') && el.getAttribute('aria-invalid') === 'true')
-  typeLive(el, '12345678')
+  typeLive(el, '04595257')
   assert.ok(!el.classList.contains('is-invalid') && el.getAttribute('aria-invalid') === null)
 })
 
@@ -873,4 +873,22 @@ test('Bug3：不相關欄位的 AI 提示、明細提示不受影響', async () 
   typeLive(ctl(page, 'invoice_date'), '2026-11-01')
   const kept = visibleAiWarnings(page).map((n) => n.textContent)
   assert.deepEqual(kept.filter((t) => t.includes('日期')), [])
+})
+
+// ---------- 人工驗收：檢查碼不符的統編不得顯示綠色「格式正確」 ----------
+test('統編檢查碼不符：顯示警示提示（field-hint--warning），不綠框、不紅框、不顯示「格式正確」', async () => {
+  const page = await load()
+  for (const field of ['seller_tax_id', 'buyer_tax_id']) {
+    const el = ctl(page, field)
+    typeLive(el, '12345678')
+    const hint = hintOf(page, field)
+    assert.ok(hint.classList.contains('field-hint--warning'), field)
+    assert.ok(!hint.classList.contains('field-hint--ok'), field)
+    assert.match(hint.textContent, /檢查碼不符/)
+    assert.doesNotMatch(hint.textContent, /格式正確/)
+    assert.ok(!el.classList.contains('is-valid') && !el.classList.contains('is-invalid'), field)
+    typeLive(el, '04595257') // 改成合法統編後回到綠色
+    assert.ok(hintOf(page, field).classList.contains('field-hint--ok'), field)
+    assert.ok(el.classList.contains('is-valid'), field)
+  }
 })
