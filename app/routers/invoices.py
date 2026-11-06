@@ -40,6 +40,9 @@ router = APIRouter(prefix="/invoices", tags=["invoices"], dependencies=[Depends(
 
 # 手機上傳影像上限：與 API 相同（Vercel 請求本文上限 4.5 MB），頁面會先縮圖
 MAX_MOBILE_IMAGE_BYTES = 4 * 1024 * 1024
+# 多頁 PDF 找發票頁：每批最多 9 張縮圖，單張 1.5 MB 以內（與 API 相同）
+MAX_PDF_PAGES_PER_BATCH = 9
+MAX_PDF_PAGE_IMAGE_BYTES = 1536 * 1024
 
 # 示範前台發票記憶體資料
 _CLIENT_INVOICES: list[dict[str, Any]] = [
@@ -235,6 +238,29 @@ async def mobile_recognize(
         content=content,
         content_type=file.content_type or "application/octet-stream",
     )
+
+
+@router.post("/pdf-pages/classify", dependencies=[Depends(verify_same_origin)], response_model=None)
+async def classify_pdf_pages(
+    token: AccessToken, files: Annotated[list[UploadFile], File()]
+) -> dict[str, Any] | JSONResponse:
+    """多頁 PDF 找發票頁：瀏覽器把 PDF 每頁轉成縮圖後分批送來，轉給 API 判斷是不是三聯式發票與聯別。"""
+    if not 1 <= len(files) <= MAX_PDF_PAGES_PER_BATCH:
+        error = {
+            "code": "INVOICE_PAGE_COUNT_INVALID",
+            "message": f"每次需送 1～{MAX_PDF_PAGES_PER_BATCH} 張頁面影像",
+        }
+        return JSONResponse({"error": error}, status_code=400)
+    images = []
+    total = 0
+    for upload in files:
+        content = await upload.read(MAX_PDF_PAGE_IMAGE_BYTES + 1)
+        total += len(content)
+        if len(content) > MAX_PDF_PAGE_IMAGE_BYTES or total > MAX_MOBILE_IMAGE_BYTES:
+            error = {"code": "INVOICE_IMAGE_TOO_LARGE", "message": "頁面影像過大，請重新選擇檔案"}
+            return JSONResponse({"error": error}, status_code=400)
+        images.append((upload.filename or "page.jpg", content, upload.content_type or "image/jpeg"))
+    return await invoices_client.classify_pdf_pages(token, images=images)
 
 
 @router.post("/check-duplicate", dependencies=[Depends(verify_same_origin)], response_model=None)

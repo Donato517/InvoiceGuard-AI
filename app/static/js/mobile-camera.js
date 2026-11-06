@@ -97,9 +97,10 @@
   const MAX_TEXT = 200;
   const MAX_CHANGES = 500;
   const MAX_UPLOAD_SIDE = 2000;
+  const MAX_PDF_BYTES = 4 * 1024 * 1024; // 挑頁模組未載入時的單頁 PDF 原檔上傳上限，與 API 相同
+  const PDF_FOUND_DELAY_MS = 900; // 找到發票頁後先顯示結果再跳到預覽
   const MAX_UPLOAD_BYTES = 3.8 * 1024 * 1024;
   const MAX_SOURCE_IMAGE_BYTES = 10 * 1024 * 1024; // 選取的原始影像（辨識前會縮圖）
-  const MAX_PDF_BYTES = 4 * 1024 * 1024; // PDF 原檔上傳，與 API 上限相同
   const MAX_ITEMS = 50;
   const HISTORY_KEY = 'ig-mobile-uploads';
 
@@ -2193,14 +2194,90 @@
     const btnRetake2 = $('#btn-retake-fields');
     if (btnRetake2) btnRetake2.onclick = chooseAgain;
 
-    // 2. 選取本機檔案：影像辨識前會縮圖，原檔可到 10 MB；PDF（只限電腦上傳頁）原檔上傳，4 MB 以內
+    // 2. 選取本機檔案：影像辨識前會縮圖，原檔可到 10 MB；
+    //    PDF（只限電腦上傳頁，4 MB、45 頁以內）由 pdf-invoice-page.js 找出三聯式發票頁並轉成影像，之後與拍照相同流程
     const fileInput = $('#file-album-upload');
+    async function pickPdfPage(f) {
+      const finder = window.InvoicePdfPage;
+      const status = $('#pdf-pick-status');
+      const show = function (msg) {
+        if (!status) return;
+        status.hidden = !msg;
+        status.textContent = msg || '';
+      };
+      // 處理中：「選擇本機檔案」改成「辨識中…」並反灰，避免重複選檔
+      const label = fileInput.closest ? fileInput.closest('label') : null;
+      const labelText = label
+        ? Array.prototype.find.call(label.childNodes || [], function (n) {
+            return n.nodeType === 3 && n.textContent.trim();
+          })
+        : null;
+      const originalText = labelText ? labelText.textContent : '';
+      const setBusy = function (busy) {
+        fileInput.disabled = busy;
+        if (!label) return;
+        label.classList.toggle('is-busy', busy);
+        if (busy) label.setAttribute('aria-disabled', 'true');
+        else label.removeAttribute('aria-disabled');
+        if (labelText) labelText.textContent = busy ? '辨識中…' : originalText;
+      };
+      releaseImage();
+      setPdfNote('');
+      const version = imageVersion;
+      setBusy(true);
+      try {
+        const found = await finder.find(f, {
+          onProgress: show,
+          isCurrent: function () {
+            return version === imageVersion;
+          },
+        });
+        if (!found || version !== imageVersion) return;
+        // 找到後不跳警示：先在畫面顯示「已找到第 X 頁」，稍候再跳到預覽（預覽頁保留同一段說明）
+        show(found.message);
+        await new Promise(function (resolve) {
+          setTimeout(resolve, PDF_FOUND_DELAY_MS);
+        });
+        if (version !== imageVersion) return;
+        setImage({ image: found.dataUrl, originalImage: found.dataUrl, rotation: 0, name: found.name });
+        setPdfNote(found.message);
+        showStep('step-preview');
+      } catch (err) {
+        if (version === imageVersion) notify((err && err.message) || 'PDF 處理失敗，請改用其他檔案');
+      } finally {
+        show('');
+        setBusy(false);
+      }
+    }
+    // 預覽步驟上方的 PDF 挑頁說明（例如「已找到第 3 頁（共 12 頁）…：第二聯」）；選其他檔案時清除
+    function setPdfNote(msg) {
+      const section = $('#step-preview');
+      if (!section) return;
+      let note = section.querySelector('.pdf-pick-note');
+      if (!msg) {
+        if (note) note.remove();
+        return;
+      }
+      if (!note) {
+        note = document.createElement('p');
+        note.className = 'pdf-pick-note';
+        note.setAttribute('role', 'status');
+        section.insertBefore(note, section.firstChild);
+      }
+      note.textContent = msg;
+    }
     if (fileInput) {
       fileInput.onchange = function (e) {
         const f = e.target.files && e.target.files[0];
         if (!f) return;
         fileInput.value = '';
+        setPdfNote('');
         if (fileMode && f.type === 'application/pdf') {
+          if (window.InvoicePdfPage) {
+            pickPdfPage(f);
+            return;
+          }
+          // 挑頁模組沒有載入（測試頁或載入失敗）：沿用原本的單頁 PDF 原檔上傳，多頁由 API 拒絕
           if (f.size > MAX_PDF_BYTES) return notify('PDF 需在 4 MB 以內');
           setImage({ isPdf: true, file: f, url: URL.createObjectURL(f), rotation: 0, name: f.name });
           showStep('step-preview');
