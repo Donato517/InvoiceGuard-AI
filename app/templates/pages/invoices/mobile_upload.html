@@ -9,6 +9,8 @@
 {% block head %}
   <link rel="stylesheet"
         href="{{ static_url('css/pages/mobile-camera.css') }}">
+  <link rel="stylesheet"
+        href="{{ static_url('css/pages/upload-layout.css') }}">
 {% endblock head %}
 {% block content %}
   <main class="mobile-app-shell" data-upload-mode="{{ upload_mode }}">
@@ -16,8 +18,9 @@
     <div class="heading">
       <span class="mobile-step-pill">MOBILE / PROCUREMENT</span>
       <h1>採購拍照上傳</h1>
-      <p class="muted">對準外框，確認後再上傳 · 拍攝 → 旋轉預覽 → 辨識 → 核對 → 查重 → 上傳</p>
+      <p class="muted">對準外框，確認後再上傳</p>
     </div>
+    {% include "partials/upload_stepper.html" %}
     {# 步驟 1：新增影像（拍照 / 相簿選取） #}
     <section id="step-upload" class="mobile-step-section">
       <div class="mobile-card">
@@ -59,4 +62,5 @@
 {% block scripts %}
   <script src="{{ static_url('js/invoice-field-rules.js') }}" defer></script>
   <script src="{{ static_url('js/mobile-camera.js') }}" defer></script>
+  <script src="{{ static_url('js/upload-stepper.js') }}" defer></script>
 {% endblock scripts %}

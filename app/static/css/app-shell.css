@@ -1,0 +1,364 @@
+/* ==========================================================================
+   前台登入後的外框（2026-11-06 對齊後台 ADMIN）：layouts/default.html、partials/app_sidebar.html、app_tabbar.html
+   - 寬螢幕（≥ 1024px）：左側欄（群組可收合、可縮成圖示列，樣式同後台）＋白色頂部列＋內容
+   - 手機與平板：深藍頂部品牌列＋底部分頁（拍照上傳、我的發票、問答）
+   - 側欄收合狀態由 main.js 在 <html> 加 sidebar-collapsed
+   ========================================================================== */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.app-shell__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-shell__content {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin-inline: auto;
+  padding: 1.625rem;
+}
+
+/* ---- 頂部列 ---- */
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-height: 3rem;
+  padding: 0 1.625rem;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-topbar__brand {
+  display: none;
+  margin-right: auto;
+  font-size: var(--font-size-lg);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.03rem;
+}
+
+.app-topbar__brand span {
+  color: var(--color-brand-accent);
+}
+
+.app-topbar__user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+.app-topbar__dept {
+  padding: 0.125rem 0.625rem;
+  font-weight: 700;
+  color: var(--color-primary-soft-text);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-pill);
+}
+
+.app-topbar__logout {
+  display: none;
+  margin: 0;
+}
+
+/* ---- 側欄（與後台 ADMIN main.css 相同的樣式與 class） ---- */
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 1.75rem 0.875rem;
+  overflow: auto;
+  color: var(--color-sidebar-text);
+  background-color: var(--color-sidebar-bg);
+}
+
+.app-sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 0 1.25rem 0.625rem;
+}
+
+.app-sidebar__logo {
+  font-size: var(--font-size-xl);
+  font-weight: 800;
+  line-height: 1.3;
+  color: #fff;
+  white-space: nowrap;
+  letter-spacing: -0.0625rem;
+}
+
+.app-sidebar__logo-accent {
+  color: var(--color-brand-accent);
+}
+
+.app-sidebar__logo-short {
+  display: none;
+}
+
+.app-sidebar__collapse {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--color-sidebar-link);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.app-sidebar__collapse:hover {
+  color: #fff;
+  background-color: rgb(255 255 255 / 8%);
+}
+
+.app-sidebar__collapse svg,
+.app-sidebar__chevron {
+  transition: transform 0.2s ease;
+}
+
+.app-sidebar__group {
+  position: relative;
+  margin-bottom: 0.25rem;
+}
+
+.app-sidebar__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0.75rem 0.875rem;
+  font: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-sidebar-link);
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.app-sidebar__group-toggle:hover {
+  color: #fff;
+  background-color: rgb(255 255 255 / 6%);
+}
+
+.app-sidebar__group-toggle:focus-visible,
+.app-sidebar__collapse:focus-visible {
+  outline: 2px solid var(--color-brand-accent);
+  outline-offset: 2px;
+}
+
+.app-sidebar__group--current > .app-sidebar__group-toggle {
+  color: #fff;
+}
+
+.app-sidebar__group-label {
+  flex: 1;
+}
+
+.app-sidebar__chevron {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.app-sidebar__group-toggle[aria-expanded="true"] .app-sidebar__chevron {
+  transform: rotate(90deg);
+}
+
+.app-sidebar__emoji {
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.app-sidebar__link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0.625rem 0.875rem 0.625rem 2.375rem;
+  margin-bottom: 0.1875rem;
+  font-size: 0.9375rem;
+  color: var(--color-sidebar-link);
+  text-align: left;
+  background: transparent;
+  border-radius: var(--radius-sm);
+}
+
+.app-sidebar__link:hover,
+.app-sidebar__link--active {
+  color: #fff;
+  background-color: var(--color-sidebar-active);
+}
+
+.app-sidebar__divider {
+  height: 1px;
+  margin: auto 0.5rem 0.75rem;
+  background: rgb(255 255 255 / 8%);
+}
+
+.app-sidebar__logout {
+  margin: 0;
+}
+
+.app-sidebar__logout-button {
+  appearance: none;
+  padding-left: 0.875rem;
+  font: inherit;
+  font-size: var(--font-size-md);
+  cursor: pointer;
+  border: 0;
+}
+
+/* ---- 側欄收合成圖示列 ---- */
+.sidebar-collapsed .app-shell {
+  grid-template-columns: var(--sidebar-width-mobile) minmax(0, 1fr);
+}
+
+.sidebar-collapsed .app-sidebar {
+  padding-right: 0.375rem;
+  padding-left: 0.375rem;
+}
+
+.sidebar-collapsed .app-sidebar__head {
+  flex-direction: column;
+  padding: 0 0 1rem;
+}
+
+.sidebar-collapsed .app-sidebar__logo-full,
+.sidebar-collapsed .app-sidebar__group-label,
+.sidebar-collapsed .app-sidebar__chevron,
+.sidebar-collapsed .app-sidebar__group-items {
+  display: none;
+}
+
+.sidebar-collapsed .app-sidebar__logo-short {
+  display: inline;
+}
+
+.sidebar-collapsed .app-sidebar__collapse svg {
+  transform: rotate(180deg);
+}
+
+.sidebar-collapsed .app-sidebar__group-toggle,
+.sidebar-collapsed .app-sidebar__logout-button {
+  justify-content: center;
+  padding: 0.875rem 0.3125rem;
+}
+
+.sidebar-collapsed .app-sidebar__emoji {
+  font-size: var(--font-size-xl);
+}
+
+.sidebar-collapsed .app-sidebar__group--current > .app-sidebar__group-toggle {
+  background-color: var(--color-sidebar-active);
+}
+
+/* ---- 手機底部分頁 ---- */
+.app-tabbar {
+  display: none;
+}
+
+/* ---- 手機與平板：不顯示側欄，改頂部品牌列＋底部分頁 ---- */
+@media (width < 1024px) {
+  .app-shell,
+  .sidebar-collapsed .app-shell {
+    display: block;
+    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+  }
+
+  .app-sidebar {
+    display: none;
+  }
+
+  .app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 0.625rem var(--space-4);
+    color: #fff;
+    background: var(--navy);
+    border-bottom: 0;
+  }
+
+  .app-topbar__brand {
+    display: inline;
+  }
+
+  .app-topbar__user {
+    color: var(--color-sidebar-text);
+    font-size: 0.8125rem;
+  }
+
+  .app-topbar__name {
+    display: none;
+  }
+
+  .app-topbar__dept {
+    color: #fff;
+    background: rgb(255 255 255 / 14%);
+  }
+
+  .app-topbar__logout {
+    display: block;
+  }
+
+  .app-topbar__logout .btn {
+    color: var(--color-sidebar-text);
+  }
+
+  .app-shell__content {
+    padding: var(--space-4);
+  }
+
+  .app-tabbar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    padding: 0.375rem 0 calc(0.5rem + env(safe-area-inset-bottom));
+    background: var(--color-bg);
+    border-top: 1px solid var(--color-border);
+    box-shadow: 0 -6px 18px rgb(16 44 82 / 6%);
+  }
+
+  .app-tabbar__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+    padding: 0.25rem 0;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+
+  .app-tabbar__icon {
+    font-size: 1.25rem;
+    line-height: 1.2;
+  }
+
+  .app-tabbar__item--active {
+    font-weight: 700;
+    color: var(--color-primary);
+  }
+}

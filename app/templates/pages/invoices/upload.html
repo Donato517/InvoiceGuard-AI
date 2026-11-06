@@ -11,6 +11,8 @@
         href="{{ static_url('css/pages/mobile-camera.css') }}">
   <link rel="stylesheet"
         href="{{ static_url('css/pages/pdf-invoice-page.css') }}">
+  <link rel="stylesheet"
+        href="{{ static_url('css/pages/upload-layout.css') }}">
 {% endblock head %}
 {% block content %}
   <main class="mobile-app-shell mobile-app-shell--wide"
@@ -18,8 +20,8 @@
     {# 頁面標頭與步驟說明 #}
     <div class="heading">
       <h1>上傳發票</h1>
-      <p class="muted">選擇檔案 → 預覽 → 辨識 → 核對 → 查重 → 上傳</p>
     </div>
+    {% include "partials/upload_stepper.html" %}
     {# 步驟 1：選擇本機檔案 #}
     <section id="step-upload" class="mobile-step-section">
       <div class="mobile-card">
@@ -54,4 +56,5 @@
           data-pdfjs-cmaps="/static/js/vendor/pdfjs/cmaps/"
           defer></script>
   <script src="{{ static_url('js/mobile-camera.js') }}" defer></script>
+  <script src="{{ static_url('js/upload-stepper.js') }}" defer></script>
 {% endblock scripts %}

@@ -1,0 +1,136 @@
+/* ==========================================================================
+   上傳頁版面（2026-11-06 對齊後台）：invoices/upload.html、mobile_upload.html
+   - 步驟卡片（partials/upload_stepper.html）：樣式同後台步驟列；手機寬度縮成「步驟 X / 6」＋進度條
+   - 寬螢幕的核對修正：原圖與欄位左右並排（同後台），原圖固定在畫面上方方便對照
+   只調整版面，不改 mobile-camera.css 與流程程式。
+   ========================================================================== */
+
+/* ---- 步驟卡片 ---- */
+.upload-stepper {
+  margin: 0 0 var(--space-4);
+}
+
+.upload-stepper__cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.upload-stepper__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  background: #e9eef6;
+  border-radius: var(--radius-md);
+}
+
+.upload-stepper__no {
+  font-size: 1.0625rem;
+  font-weight: 700;
+}
+
+.upload-stepper__item--done {
+  color: #157a45;
+  background: #e3f8ec;
+}
+
+.upload-stepper__item--active {
+  font-weight: 700;
+  color: var(--color-primary);
+  background: #dbe8fb;
+}
+
+.upload-stepper__compact {
+  display: none;
+}
+
+@media (width < 768px) {
+  .upload-stepper__cards {
+    display: none;
+  }
+
+  .upload-stepper__compact {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.375rem 0.75rem;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+  }
+
+  .upload-stepper__compact b {
+    color: var(--color-primary);
+  }
+
+  .upload-stepper__bar {
+    grid-column: 1 / -1;
+    height: 6px;
+    overflow: hidden;
+    background: #e3eaf4;
+    border-radius: 3px;
+  }
+
+  .upload-stepper__bar i {
+    display: block;
+    width: 16.7%; /* 第 1 步；之後由 upload-stepper.js 更新 */
+    height: 100%;
+    background: var(--color-primary);
+    border-radius: 3px;
+    transition: width 0.2s ease;
+  }
+}
+
+/* ---- 寬螢幕：版面放寬，核對修正左右並排 ---- */
+@media (width >= 1024px) {
+  .mobile-app-shell,
+  .mobile-app-shell--wide {
+    max-width: 1180px;
+  }
+
+  /* 選檔、預覽、查重等單欄步驟維持易讀寬度 */
+  .mobile-app-shell .mobile-step-section:not(#step-fields) {
+    max-width: 760px;
+  }
+
+  #step-fields > .mobile-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: 0 var(--space-6);
+    align-items: start;
+  }
+
+  #step-fields > .mobile-card > * {
+    grid-column: 2;
+  }
+
+  #step-fields > .mobile-card > .preview-box {
+    position: sticky;
+    top: calc(3rem + var(--space-4));
+    grid-row: 1 / span 20;
+    grid-column: 1;
+    max-height: calc(100vh - 7rem);
+    min-height: 320px;
+  }
+
+  #step-fields > .mobile-card > .preview-box img {
+    max-height: calc(100vh - 9rem);
+    width: 100%;
+    object-fit: contain;
+  }
+}
+
+/* 有步驟卡片時，各步驟卡片內原本的「步驟 N：…」小標籤會和卡片編號重複（辨識不是獨立畫面），改由上方步驟卡片表示 */
+.upload-stepper ~ .mobile-step-section .mobile-step-pill {
+  display: none;
+}

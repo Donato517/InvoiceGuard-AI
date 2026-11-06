@@ -1,0 +1,64 @@
+{#
+  @template partials/app_sidebar.html
+  @description 前台登入後的左側欄（2026-11-06 對齊後台 ADMIN）：群組可展開／收合，目前頁面所在群組預設展開；
+    可收合成圖示列。開合與收合狀態由 main.js 記在瀏覽器。手機寬度不顯示（改用 partials/app_tabbar.html）。
+  @context request: 目前請求；項目來自 app_sidebar_groups(request.url.path)（app.utils.app_nav）
+#}
+<aside class="app-sidebar" aria-label="主選單">
+  <div class="app-sidebar__head">
+    <a href="/invoices" class="app-sidebar__logo">
+      <span class="app-sidebar__logo-full">InvoiceGuard <span class="app-sidebar__logo-accent">AI</span></span>
+      <span class="app-sidebar__logo-short" aria-hidden="true">IG</span>
+    </a>
+    <button class="app-sidebar__collapse"
+            type="button"
+            data-sidebar-collapse
+            aria-label="收合側欄"
+            title="收合側欄">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M10 3.5 5.5 8 10 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+  </div>
+  <nav aria-label="功能">
+    {% for group in app_sidebar_groups(request.url.path) %}
+      <div class="app-sidebar__group{% if group.current %} app-sidebar__group--current{% endif %}"
+           data-sidebar-group="{{ group.key }}">
+        <button class="app-sidebar__group-toggle"
+                type="button"
+                aria-expanded="{{ 'true' if group.current else 'false' }}"
+                aria-controls="sidebar-group-{{ group.key }}"
+                title="{{ group.title }}">
+          <span class="app-sidebar__emoji" aria-hidden="true">{{ group.icon }}</span>
+          <span class="app-sidebar__group-label">{{ group.title }}</span>
+          <svg class="app-sidebar__chevron"
+               aria-hidden="true"
+               viewBox="0 0 16 16"
+               width="14"
+               height="14">
+            <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="app-sidebar__group-items"
+             id="sidebar-group-{{ group.key }}"
+             {% if not group.current %}hidden{% endif %}>
+          {% for item in group.items %}
+            <a class="app-sidebar__link{% if item.active %} app-sidebar__link--active{% endif %}"
+               href="{{ item.route }}"
+               {% if item.active %}aria-current="page"{% endif %}>{{ item.name }}</a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </nav>
+  <div class="app-sidebar__divider" aria-hidden="true"></div>
+  <form method="post"
+        action="/logout"
+        class="app-sidebar__logout"
+        data-confirm="確定要登出嗎？">
+    <button type="submit" class="app-sidebar__link app-sidebar__logout-button" title="登出">
+      <span class="app-sidebar__emoji" aria-hidden="true">🚪</span>
+      <span class="app-sidebar__group-label">登出</span>
+    </button>
+  </form>
+</aside>

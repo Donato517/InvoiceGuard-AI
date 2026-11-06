@@ -1,0 +1,15 @@
+{#
+  @template partials/app_tabbar.html
+  @description 前台登入後的手機底部分頁（2026-11-06）：拍照上傳、我的發票、問答，單手好按；寬螢幕不顯示（改用左側欄）。
+  @context request: 目前請求；項目來自 app_tab_items(request.url.path)（app.utils.app_nav）
+#}
+<nav class="app-tabbar" aria-label="主要分頁">
+  {% for item in app_tab_items(request.url.path) %}
+    <a class="app-tabbar__item{% if item.active %} app-tabbar__item--active{% endif %}"
+       href="{{ item.route }}"
+       {% if item.active %}aria-current="page"{% endif %}>
+      <span class="app-tabbar__icon" aria-hidden="true">{{ item.icon }}</span>
+      {{ item.name }}
+    </a>
+  {% endfor %}
+</nav>

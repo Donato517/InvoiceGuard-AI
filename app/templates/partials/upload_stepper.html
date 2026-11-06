@@ -1,0 +1,25 @@
+{#
+  @template partials/upload_stepper.html
+  @description 上傳流程的步驟卡片（2026-11-06 對齊後台的步驟列）：完成打 ✓、目前步驟藍底；手機寬度縮成「步驟 X / 6」與進度條。
+    目前步驟由 js/upload-stepper.js 依畫面上顯示的步驟區塊（#step-upload、#step-preview…）自動更新，不改 mobile-camera.js。
+  @context upload_mode: str  "camera"（拍照上傳頁）或 "file"（電腦上傳頁），只影響第 1 步的文字
+#}
+{% set first_step = "拍攝" if upload_mode == "camera" else "選擇檔案" %}
+{% set step_names = [first_step, "預覽", "辨識", "核對修正", "查重", "上傳"] %}
+<div class="upload-stepper" data-upload-stepper>
+  <ol class="upload-stepper__cards" aria-label="上傳步驟">
+    {% for name in step_names %}
+      <li class="upload-stepper__item{% if loop.first %} upload-stepper__item--active{% endif %}"
+          data-step="{{ loop.index }}"
+          {% if loop.first %}aria-current="step"{% endif %}>
+        <span class="upload-stepper__no">{{ loop.index }}</span>
+        <span class="upload-stepper__label">{{ name }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+  <div class="upload-stepper__compact" aria-hidden="true">
+    <span>步驟 <b data-stepper-now>1</b> / {{ step_names | length }}</span>
+    <b data-stepper-name>{{ first_step }}</b>
+    <span class="upload-stepper__bar"><i data-stepper-bar></i></span>
+  </div>
+</div>

@@ -51,3 +51,78 @@ window.addEventListener('pageshow', () => {
   }
 })
 
+/**
+ * 登入後左側欄（partials/app_sidebar.html，2026-11-06 對齊後台）：群組展開／收合、收合成圖示列。
+ * 狀態記在瀏覽器；無痕或封鎖儲存時照預設顯示（目前頁面所在群組展開、側欄不收合）。
+ * 圖示列時點群組圖示：先展開側欄並打開該群組。
+ */
+const SIDEBAR_COLLAPSED_KEY = 'ig-front-sidebar-collapsed'
+const SIDEBAR_OPEN_KEY = 'ig-front-sidebar-open-groups'
+
+function readSidebarPrefs() {
+  try {
+    const storage = window.localStorage
+    return {
+      collapsed: storage.getItem(SIDEBAR_COLLAPSED_KEY) === '1',
+      open: JSON.parse(storage.getItem(SIDEBAR_OPEN_KEY) || '[]')
+    }
+  } catch {
+    return { collapsed: false, open: [] }
+  }
+}
+
+function saveSidebarPref(key, value) {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    // 無法保存時只影響下次開頁的預設狀態
+  }
+}
+
+function setSidebarGroup(group, open) {
+  const toggle = group.querySelector('.app-sidebar__group-toggle')
+  const items = group.querySelector('.app-sidebar__group-items')
+  if (!toggle || !items) return
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false')
+  items.hidden = !open
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.documentElement.classList.toggle('sidebar-collapsed', collapsed)
+  document.querySelectorAll('[data-sidebar-collapse]').forEach((button) => {
+    const label = collapsed ? '展開側欄' : '收合側欄'
+    button.setAttribute('aria-label', label)
+    button.setAttribute('title', label)
+  })
+}
+
+const sidebarPrefs = readSidebarPrefs()
+const openSidebarGroups = new Set(Array.isArray(sidebarPrefs.open) ? sidebarPrefs.open : [])
+setSidebarCollapsed(sidebarPrefs.collapsed)
+document.querySelectorAll('[data-sidebar-group]').forEach((group) => {
+  if (openSidebarGroups.has(group.dataset.sidebarGroup)) setSidebarGroup(group, true)
+})
+
+document.addEventListener('click', (event) => {
+  const target = event.target instanceof Element ? event.target : null
+  if (!target) return
+  if (target.closest('[data-sidebar-collapse]')) {
+    const collapsed = !document.documentElement.classList.contains('sidebar-collapsed')
+    setSidebarCollapsed(collapsed)
+    saveSidebarPref(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+    return
+  }
+  const toggle = target.closest('.app-sidebar__group-toggle')
+  const group = toggle && toggle.closest('[data-sidebar-group]')
+  if (!group) return
+  let open = toggle.getAttribute('aria-expanded') !== 'true'
+  if (document.documentElement.classList.contains('sidebar-collapsed')) {
+    setSidebarCollapsed(false)
+    saveSidebarPref(SIDEBAR_COLLAPSED_KEY, '0')
+    open = true
+  }
+  setSidebarGroup(group, open)
+  if (open) openSidebarGroups.add(group.dataset.sidebarGroup)
+  else openSidebarGroups.delete(group.dataset.sidebarGroup)
+  saveSidebarPref(SIDEBAR_OPEN_KEY, JSON.stringify([...openSidebarGroups]))
+})
