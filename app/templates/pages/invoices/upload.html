@@ -1,6 +1,6 @@
 {#
   @template pages/invoices/upload.html
-  @description 上傳發票（電腦選檔）：選擇本機的 JPG／PNG 影像或單頁 PDF → 預覽 → AI 辨識（經 API）→ 核對修正（標記使用者修改的欄位）→ 查重 → 送出；與手機拍照頁共用 mobile-camera.js 與步驟片段。
+  @description 上傳發票（電腦選檔）：選擇本機的 JPG／PNG 影像或 PDF（多頁時自動找出三聯式發票頁，第一聯擋下）→ 預覽 → AI 辨識（經 API）→ 核對修正（標記使用者修改的欄位）→ 查重 → 送出；與手機拍照頁共用 mobile-camera.js 與步驟片段。
   @route GET /invoices/upload（需登入）
   @context upload_mode: str  固定為 "file"
 #}
@@ -9,6 +9,8 @@
 {% block head %}
   <link rel="stylesheet"
         href="{{ static_url('css/pages/mobile-camera.css') }}">
+  <link rel="stylesheet"
+        href="{{ static_url('css/pages/pdf-invoice-page.css') }}">
 {% endblock head %}
 {% block content %}
   <main class="mobile-app-shell mobile-app-shell--wide"
@@ -31,7 +33,8 @@
                    accept="image/jpeg,image/png,application/pdf"
                    hidden>
           </label>
-          <p class="mobile-dropzone__hint">JPG / PNG 影像 10 MB 以內（辨識前自動縮小）；PDF 4 MB 以內且只有一頁</p>
+          <p class="mobile-dropzone__hint">JPG / PNG 影像 10 MB 以內（辨識前自動縮小）；PDF 4 MB、45 頁以內，自動找出三聯式發票頁（第一聯存根聯不能報帳）</p>
+          <p id="pdf-pick-status" class="pdf-pick-status" role="status" aria-live="polite" hidden></p>
         </div>
       </div>
     </section>
@@ -45,5 +48,10 @@
 {% endblock content %}
 {% block scripts %}
   <script src="{{ static_url('js/invoice-field-rules.js') }}" defer></script>
+  <script src="{{ static_url('js/pdf-invoice-page.js') }}"
+          data-pdfjs="{{ static_url('js/vendor/pdfjs/pdf.min.mjs') }}"
+          data-pdfjs-worker="{{ static_url('js/vendor/pdfjs/pdf.worker.min.mjs') }}"
+          data-pdfjs-cmaps="/static/js/vendor/pdfjs/cmaps/"
+          defer></script>
   <script src="{{ static_url('js/mobile-camera.js') }}" defer></script>
 {% endblock scripts %}

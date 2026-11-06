@@ -47,6 +47,23 @@ async def recognize_invoice(
     return await request_json("POST", "/invoices/recognize", token=token, files=files)
 
 
+async def classify_pdf_pages(token: str, *, images: list[tuple[str, bytes, str]]) -> dict[str, Any]:
+    """多頁 PDF 找發票頁（POST /invoices/pdf-pages/classify）：判斷頁面縮圖是不是三聯式發票與聯別。
+
+    Args:
+        token: 使用者的 access token。
+        images: 依頁序排列的 (檔名, 內容, 類型)，每次 1～9 張。
+
+    Returns:
+        {"pages": [{"index", "is_triplicate_invoice", "copy_no"}], "model"}
+
+    Raises:
+        ApiError: 影像不符（400）、Session 無效（401）、模型失敗（502）或服務無法使用（503）。
+    """
+    files = [("files", image) for image in images]
+    return await request_json("POST", "/invoices/pdf-pages/classify", token=token, files=files)
+
+
 async def check_duplicate(
     token: str, *, invoice_track: str, invoice_number: str, seller_tax_id: str
 ) -> dict[str, Any]:
