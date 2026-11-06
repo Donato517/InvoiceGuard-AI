@@ -115,4 +115,13 @@
   --color-modal-footer-bg: #f8faff;
   --color-modal-backdrop: #10243b80;
   --color-progress-bg: #e8eff8;
+
+  /* ---- 登入後外框（2026-11-06 對齊後台，值與 ADMIN variables.css 相同）---- */
+  --sidebar-width: 220px;
+  --sidebar-width-mobile: 70px;
+  --color-sidebar-bg: var(--navy);
+  --color-sidebar-text: #d3e2f5;
+  --color-sidebar-link: #cedcf0;
+  --color-sidebar-active: #244e80;
+  --color-sidebar-caption: #90aacd;
 }

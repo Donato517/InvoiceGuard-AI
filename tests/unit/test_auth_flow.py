@@ -123,7 +123,9 @@ def test_protected_page_shows_current_user_and_department(logged_in_client: Test
     response = logged_in_client.get("/invoices/mobile-upload")
 
     assert response.status_code == 200
-    assert "測試使用者｜採購部" in response.text
+    # 2026-11-06 對齊後台：頂部列分開顯示登入者與目前部門（部門為標籤）
+    assert '<span class="app-topbar__name">測試使用者</span>' in response.text
+    assert '<span class="app-topbar__dept">採購部</span>' in response.text
 
 
 def test_invalid_session_redirects_to_login_and_clears_cookie(

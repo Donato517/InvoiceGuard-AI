@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.constants import INVOICE_STATUS_LABEL, SESSION_COOKIE_NAME, SITE_NAME
 from app.core.config import BASE_DIR, settings
 from app.core.constants import ROBOTS_POLICY, SITE_ICON
+from app.utils.app_nav import sidebar_groups, tab_items
 from app.utils.format import TAIPEI_TZ, format_currency, format_date, format_datetime
 
 templates = Jinja2Templates(directory=BASE_DIR / "app" / "templates")
@@ -44,6 +45,8 @@ templates.env.globals.update(
     INVOICE_STATUS_LABEL=INVOICE_STATUS_LABEL,
     static_url=static_url,
     current_year=current_year,
+    app_sidebar_groups=sidebar_groups,
+    app_tab_items=tab_items,
 )
 
 # ---- 樣板 filter：{{ value | currency }} ----

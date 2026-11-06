@@ -1,15 +1,46 @@
 {#
   @template layouts/default.html
-  @description 前台預設版型：頁首 + 內容 + 頁尾。一般頁面繼承此檔。
+  @description 前台預設版型。一般頁面繼承此檔。
+    - 已登入（require_session 核對過 request.state.current_user）：左側欄＋頂部列＋內容，與後台 ADMIN 相同的外框；
+      手機寬度改為頂部品牌列＋底部分頁（2026-11-06 對齊後台）。
+    - 未登入：沿用原本的頁首＋內容＋頁尾。
   @block content 頁面主要內容
 #}
 {% extends "base.html" %}
 {% block body %}
-  <div class="default-layout">
-    {% include "partials/header.html" %}
-    <main class="default-layout__main container">
-      {% block content %}{% endblock %}
-    </main>
-    {% include "partials/footer.html" %}
-  </div>
+  {% set shell_user = request.state.current_user if request.cookies.get(SESSION_COOKIE_NAME) and request.state.current_user is defined else None %}
+  {% if shell_user %}
+    <div class="app-shell">
+      {% include "partials/app_sidebar.html" %}
+      <div class="app-shell__main">
+        <header class="app-topbar">
+          <a href="/invoices" class="app-topbar__brand">InvoiceGuard <span>AI</span></a>
+          <div class="app-topbar__user">
+            <span class="app-topbar__name">{{ shell_user.display_name }}</span>
+            <span class="app-topbar__dept">{{ shell_user.department.department_name }}</span>
+            {#- 手機寬度沒有側欄，登出放在頂部列 -#}
+            <form method="post"
+                  action="/logout"
+                  class="app-topbar__logout"
+                  data-confirm="確定要登出嗎？">
+              <button type="submit" class="btn btn--text">登出</button>
+            </form>
+          </div>
+        </header>
+        <main class="app-shell__content">
+          {% block content %}{% endblock %}
+        </main>
+        {% include "partials/footer.html" %}
+      </div>
+      {% include "partials/app_tabbar.html" %}
+    </div>
+  {% else %}
+    <div class="default-layout">
+      {% include "partials/header.html" %}
+      <main class="default-layout__main container">
+        {{ self.content() }}
+      </main>
+      {% include "partials/footer.html" %}
+    </div>
+  {% endif %}
 {% endblock body %}
